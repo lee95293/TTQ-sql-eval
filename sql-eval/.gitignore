@@ -1,0 +1,22 @@
+data/postgres
+data/*embeddings.pkl
+data/*ner_metadata.pkl
+results
+
+# credentials
+**/.env.yaml
+results_fn_bigquery/*.json
+results_fn_postgres/*.json
+
+# pycache
+**/__pycache__/
+.pytest_cache
+
+# virtual envs
+*venv/
+*env/
+
+.vscode
+
+# all eda notebooks
+eda_*.ipynb
