@@ -1,0 +1,1170 @@
+db_name,query_category,question,instructions,query,full_instructions,db_type,generated_query,reason,error_msg,exact_match,correct,error_query_gen,error_db_exec,timeout,latency_seconds,tokens_used,k_shot_prompt,glossary,table_metadata_string,prev_invalid_sql,prev_error_msg,question_0,query_0,question_1,query_1,cot_instructions,cot_pregen
+broker,instructions_cte_join,"For customers with at least 5 total transactions, what is their transaction success rate? Return the customer name and success rate, ordered from lowest to highest success rate.","
+Follow the instructions below to generate the query:
+To get the success rate of transactions per customer, join customer and transaction tables, group by customer, and calculate the percentage of successful transactions.
+","WITH cust_tx_stats AS (SELECT c.sbCustId, c.sbCustName, COUNT(t.sbTxId) AS total_tx, SUM(CASE WHEN t.sbTxStatus = 'success' THEN 1 ELSE 0 END) AS success_tx FROM sbCustomer c JOIN sbTransaction t ON c.sbCustId = t.sbTxCustId GROUP BY c.sbCustId, c.sbCustName) SELECT sbCustName, success_tx::float/total_tx AS success_rate FROM cust_tx_stats WHERE total_tx >= 5 ORDER BY success_rate","CR = customer rank by total transaction amount, with different rankings based on transaction amounts MoMC = month-over-month change in average closing price based on previous month's averages for each ticker each month To get the success rate of transactions per customer, join customer and transaction tables, group by customer, and calculate the percentage of successful transactions. Always join transactions with customers before using the transactions table. TAC = Total Active Customers who joined after a certain date",postgres,"SELECT sbCustName, 
+       CAST(COUNT(CASE WHEN sbTxStatus ='success' THEN 1 END) AS FLOAT) / NULLIF(COUNT(*), 0) AS transaction_success_rate
+FROM sbCustomer
+JOIN sbTransaction ON sbCustomer.sbCustId  =  sbTransaction.sbTxCustId
+GROUP BY sbCustName
+HAVING COUNT(*) >= 5
+ORDER BY transaction_success_rate ASC;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_cte_join,What are the 5 most frequently bought stock ticker symbols in the past 10 days? Return the ticker symbol and number of buy transactions.,"
+Follow the instructions below to generate the query:
+To find the most popular stocks in the past 10 days, join the transaction and ticker tables, filter for buy transactions in the last 10 days, group by ticker and count transactions.
+","WITH popular_stocks AS (SELECT t.sbTickerSymbol, COUNT(*) AS tx_count FROM sbTransaction tx JOIN sbTicker t ON tx.sbTxTickerId = t.sbTickerId WHERE tx.sbTxType = 'buy' AND tx.sbTxDateTime >= CURRENT_DATE - INTERVAL '10 days' GROUP BY t.sbTickerSymbol) SELECT sbTickerSymbol, tx_count FROM popular_stocks ORDER BY tx_count DESC LIMIT 5","MoMC = month-over-month change in average closing price Weekend days refer to Saturday and Sunday; adjust dates to weeks for aggregation. To find the most popular stocks in the past 10 days, join the transaction and ticker tables, filter for buy transactions in the last 10 days, group by ticker and count transactions. CR = customer rank by total transaction volume, where rank 1 belongs to the customer with the highest volume",postgres,"SELECT sbTicker.sbTickerSymbol, COUNT(sbTransaction.sbTxId) AS buy_transactions
+FROM sbTicker
+JOIN sbTransaction ON sbTicker.sbTickerId = sbTransaction.sbTxTickerId
+WHERE sbTransaction.sbTxType = 'buy' AND sbTransaction.sbTxDateTime >= (current_date - interval '10 day')
+GROUP BY sbTicker.sbTickerSymbol
+ORDER BY buy_transactions DESC
+LIMIT 5;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_cte_join,"Which 3 distinct stocks had the highest price change between the low and high from April 1 2023 to April 4 2023? I want the different in the low and high throughout this timerange, not just the intraday price changes. Return the ticker symbol and price change.","
+Follow the instructions below to generate the query:
+To analyze stock performance, join the daily price and ticker tables, filter for a specific date range, and calculate price change.
+","WITH stock_stats AS (SELECT t.sbTickerSymbol, MIN(d.sbDpLow) AS min_price, MAX(d.sbDpHigh) AS max_price FROM sbDailyPrice d JOIN sbTicker t ON d.sbDpTickerId = t.sbTickerId WHERE d.sbDpDate BETWEEN '2023-04-01' AND '2023-04-04' GROUP BY t.sbTickerSymbol) SELECT sbTickerSymbol, max_price - min_price AS price_change FROM stock_stats ORDER BY price_change DESC LIMIT 3","PMCS = per month customer signups
+TAC = Total Active Customers who joined after a certain date
+PMAT = per month average transaction amount, using date truncation for aggregation.
+To analyze stock performance, join the daily price and ticker tables, filter for a specific date range, and calculate price change.
+CR = customer rank by total transaction amount, with the highest transaction amount getting the top rank",postgres,"SELECT sbTicker.sbTickerSymbol, sbTicker.sbTickerSymbol, 
+       (SELECT max(sbDpHigh) - max(sbDpLow) FROM sbDailyPrice WHERE sbDpDate BETWEEN '2023-04-01' AND '2023-04-04') AS price_change
+FROM sbTicker
+WHERE sbTicker.sbTickerId IN (SELECT sbTxTickerId FROM sbTransaction WHERE sbTxDateTime BETWEEN '2023-04-01' AND '2023_04_04')
+GROUP BY sbTicker.sbTickerId
+ORDER BY price_change DESC
+LIMIT 3;",,QUERY EXECUTION ERROR: cannot reindex on an axis with duplicate labels,0,0,0,1,0,,0,,,,,,,,,,,False
+broker,instructions_cte_join,Who are the top 5 customers by total transaction amount? Return their name and total amount.,"
+Follow the instructions below to generate the query:
+To get the total transaction amount per customer, join the customer and transaction tables, group by customer, and sum the transaction amounts.
+","WITH cust_tx AS (SELECT c.sbCustId, c.sbCustName, SUM(t.sbTxAmount) AS total_amount FROM sbCustomer c JOIN sbTransaction t ON c.sbCustId = t.sbTxCustId GROUP BY c.sbCustId, c.sbCustName) SELECT sbCustName, total_amount FROM cust_tx ORDER BY total_amount DESC LIMIT 5","To get the total transaction amount per customer, join the customer and transaction tables, group by customer, and sum the transaction amounts.
+TAC = Total Active Customers who have recently joined
+MoMC = Month-over-month change in average closing price for each ticker.
+ACP = Average Closing Price of tickers over a recent period",postgres,"SELECT sbCustName,  sum(sbTxAmount) FROM sbCustomer JOIN sbTransaction ON sbCustomer.sbCustId  =  sbTransaction.sbTxCustId GROUP BY sbCustName ORDER BY sum(sbTxAmount) DESC LIMIT 5;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_cte_window,"Return the customer name, number of transactions, total transaction amount, and CR for all customers","
+Follow the instructions below to generate the query:
+CR = customer rank by total transaction amount, with rank 1 being the customer with the highest total transaction amount
+","WITH cust_tx_counts AS (SELECT sbTxCustId, COUNT(*) AS num_tx, SUM(sbTxAmount) AS total_amount FROM sbTransaction GROUP BY sbTxCustId) SELECT c.sbCustName, ct.num_tx, ct.total_amount, RANK() OVER (ORDER BY ct.total_amount DESC) AS cust_rank FROM cust_tx_counts ct JOIN sbCustomer c ON ct.sbTxCustId = c.sbCustId","ACP = Average Closing Price of tickers over a select period of days
+TAC = Total Active Customers who have recently joined
+NPM (Net Profit Margin) = Net income divided by net sales for a specific time frame, expressed as a percentage for transactions in a recent period.
+CR = customer rank by total transaction amount, with rank 1 being the customer with the highest total transaction amount",postgres,"SELECT 
+  sbCustName, 
+  COUNT(*) AS transaction_count, 
+  SUM(sbTxAmount) AS total_transaction_amount, 
+  CASE 
+    WHEN COUNT(*) = 0 THEN 0 
+    ELSE SUM(sbTxAmount) / NULLIF(COUNT(*), 0) 
+  END AS CR 
+FROM 
+  sbCustomer 
+JOIN 
+  sbTransaction ON sbCustId = sbTxCustId 
+GROUP BY 
+  sbCustName;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_cte_window,"What is the ticker symbol, month, average closing price, highest price, lowest price, and MoMC for each ticker by month?","
+Follow the instructions below to generate the query:
+MoMC = month-over-month change in average closing price = (avg_close_given_month - avg_close_previous_month) / avg_close_previous_month for each ticker symbol each month.
+Recall that we want the symbol, and not just the ticker id.
+","WITH monthly_price_stats AS (SELECT DATE_TRUNC('month', sbDpDate) AS MONTH, sbDpTickerId, AVG(sbDpClose) AS avg_close, MAX(sbDpHigh) AS max_high, MIN(sbDpLow) AS min_low FROM sbDailyPrice GROUP BY MONTH, sbDpTickerId) SELECT t.sbTickerSymbol, mps.month, mps.avg_close, mps.max_high, mps.min_low, (mps.avg_close - LAG(mps.avg_close) OVER (PARTITION BY mps.sbDpTickerId ORDER BY mps.month)) / LAG(mps.avg_close) OVER (PARTITION BY mps.sbDpTickerId ORDER BY mps.month) AS mom_change FROM monthly_price_stats mps JOIN sbTicker t ON mps.sbDpTickerId = t.sbTickerId;","NPM (Net Profit Margin) = (Total Income from Sales - (Tax + Commission Expenses)) / Total Income from Sales * 100, for recent transactions. TAC = Total Active Customers who have recently joined ACP = Average Closing Price of tickers over a recent period MoMC = month-over-month change in average closing price = (avg_close_given_month - avg_close_previous_month) / avg_close_previous_month for each ticker each month",postgres,"SELECT 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month') AS month, 
+  avg(sbDailyPrice.sbDpClose) AS average_closing_price, 
+  max(sbDailyPrice.sbDpHigh) AS highest_price, 
+  min(sbDailyPrice.sbDpLow) AS lowest_price, _
+  (avg(sbDailyPrice.sbDpClose) - 
+    lag(avg(sbDailyPrice.sbDpClose)) OVER (PARTITION BY sbDailyPrice.sbDpTickerId ORDER BY sbDailyPrice.sbDpDate)) / 
+    lag(avg(sbDailyPrice.sbDpClose)) OVER (PARTITION BY sbDailyPrice.sbDpTickerId) AS month_over_month_change
+FROM 
+  sbTicker
+JOIN 
+  sbDailyPrice ON sbTicker.sbTickerId = sbDailyPrice.sbDpTickerId
+GROUP BY 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month')
+ORDER BY 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month');",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedFunction) function _(numeric) does not exist
+LINE 6:   min(sbDailyPrice.sbDpLow) AS lowest_price, _
+                                                     ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month') AS month, 
+  avg(sbDailyPrice.sbDpClose) AS average_closing_price, 
+  max(sbDailyPrice.sbDpHigh) AS highest_price, 
+  min(sbDailyPrice.sbDpLow) AS lowest_price, _
+  (avg(sbDailyPrice.sbDpClose) - 
+    lag(avg(sbDailyPrice.sbDpClose)) OVER (PARTITION BY sbDailyPrice.sbDpTickerId ORDER BY sbDailyPrice.sbDpDate)) / 
+    lag(avg(sbDailyPrice.sbDpClose)) OVER (PARTITION BY sbDailyPrice.sbDpTickerId) AS month_over_month_change
+FROM 
+  sbTicker
+JOIN 
+  sbDailyPrice ON sbTicker.sbTickerId = sbDailyPrice.sbDpTickerId
+GROUP BY 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month')
+ORDER BY 
+  sbTicker.sbTickerSymbol, 
+  to_char(sbDailyPrice.sbDpDate, 'Month');]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+broker,instructions_date_join,How many transactions for stocks occurred in each of the last 8 weeks excluding the current week? How many of these transactions happened on weekends?,"
+Follow the instructions below to generate the query:
+Weekend days are Saturday and Sunday.
+Truncate date to week for aggregation.
+","SELECT DATE_TRUNC('week', t.sbTxDateTime) AS WEEK, COUNT(t.sbTxId) AS num_transactions, COUNT(CASE WHEN EXTRACT(dow FROM t.sbTxDateTime) IN (0, 6) THEN 1 END) AS weekend_transactions FROM sbTransaction t JOIN sbTicker tk ON t.sbTxTickerId = tk.sbTickerId WHERE tk.sbTickerType = 'stock' AND t.sbTxDateTime >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '8 weeks' AND t.sbTxDateTime < DATE_TRUNC('week', CURRENT_DATE) GROUP BY WEEK","For an analysis of stock performance, link daily price data with ticker information, select a relevant time period, and calculate the change in price
+To determine the success rate of transactions for each customer, merge customer and transaction records, group by customer ID, and compute the ratio of successful transactions.
+Weekend days are Saturday and Sunday. Truncate date to week for aggregation.
+To get the total amount of transactions per customer, perform a join between customer and transaction datasets, then group by customer ID and sum up the transaction amounts",postgres,"SELECT 
+  date_trunc('week', sbTxDateTime) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles',
+  count(*),
+  sum(CASE WHEN EXTRACT(DOW FROM date_trunc('week', sbTxDateTime)) IN (6, 0) THEN 1 ELSE 0 END)
+FROM 
+  sbTransaction
+WHERE _date_part('year', sbTxDateTime) = extract(year from current_date) - 1
+GROUP BY 
+  date_trunc('week', sbTxDateTime)
+ORDER BY 
+  date_trunc('week', sbTxDateTime) DESC;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedFunction) function _date_part(unknown, timestamp without time zone) does not exist
+LINE 7: WHERE _date_part('year', sbTxDateTime) = extract(year from c...
+              ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT 
+  date_trunc('week', sbTxDateTime) AT TIME ZONE 'UTC' AT TIME ZONE 'America/Los_Angeles',
+  count(*),
+  sum(CASE WHEN EXTRACT(DOW FROM date_trunc('week', sbTxDateTime)) IN (6, 0) THEN 1 ELSE 0 END)
+FROM 
+  sbTransaction
+WHERE _date_part('year', sbTxDateTime) = extract(year from current_date) - 1
+GROUP BY 
+  date_trunc('week', sbTxDateTime)
+ORDER BY 
+  date_trunc('week', sbTxDateTime) DESC;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+broker,instructions_date_join,How many transactions were made by customers from the USA last week (exclusive of the current week)? Return the number of transactions and total transaction amount.,"
+Follow the instructions below to generate the query:
+Last week = DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' to DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 millisecond'.
+Always join transactions with customers before using the transactions table.
+","SELECT COUNT(sbTxId) AS num_transactions, SUM(sbTxAmount) AS total_amount FROM sbTransaction t JOIN sbCustomer c ON t.sbTxCustId = c.sbCustId WHERE c.sbCustCountry = 'USA' AND t.sbTxDateTime BETWEEN DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' AND DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 millisecond'","To analyze stock performance, join the daily price and ticker tables and calculate price change To get the total transaction amount per customer, join the customer and transaction tables, group by customer, and sum the transaction amounts. Last week = DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' to DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 day'. Always join transactions with customers before using the transactions table. To get the success rate of transactions per customer, join customer and transaction tables, group by customer, and calculate the percentage of successful transactions",postgres,"SELECT count(*),  sum(sbTxAmount) FROM sbTransaction WHERE sbTxCustCountry  =  'USA' AND sbTxDateTime >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' AND sbTxDateTime <  DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 millisecond';",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""sbtxcustcountry"" does not exist
+LINE 1: ...unt(*),  sum(sbTxAmount) FROM sbTransaction WHERE sbTxCustCo...
+                                                             ^
+
+[SQL: SELECT count(*),  sum(sbTxAmount) FROM sbTransaction WHERE sbTxCustCountry  =  'USA' AND sbTxDateTime >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' AND sbTxDateTime <  DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 millisecond';]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+broker,instructions_date_join,What are the PMCS and PMAT for customers who signed up in the last 6 months excluding the current month?,"
+Follow the instructions below to generate the query:
+PMCS = per month customer signups.
+PMAT = per month average transaction amount.
+Truncate date to month for aggregation.
+","SELECT DATE_TRUNC('month', sbCustJoinDate) AS MONTH, COUNT(sbCustId) AS customer_signups, AVG(t.sbTxAmount) AS avg_tx_amount FROM sbCustomer c LEFT JOIN sbTransaction t ON c.sbCustId = t.sbTxCustId AND DATE_TRUNC('month', t.sbTxDateTime) = DATE_TRUNC('month', c.sbCustJoinDate) WHERE sbCustJoinDate >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months' AND sbCustJoinDate < DATE_TRUNC('month', CURRENT_DATE) GROUP BY MONTH","ACP = Average Closing Price of tickers over a selected period, including the end day
+CR = customer rank by total transaction amount, where the top customer has the highest amount.
+PMCS = per month customer signups. PMAT = per month average transaction amount. Truncate date to month for aggregation.
+TAC = Total Active Customers who joined after a specified date",postgres,"SELECT 
+  date_trunc('month', sbCustJoinDate) AS sbCustJoinMonth,
+  count(*) AS pmcs,
+  avg(sbTxPrice) AS pmat
+FROM 
+  sbCustomer
+JOIN 
+  sbTransaction ON sbCustomer.sbCustId = sbTransaction.sbTxCustId
+WHERE _date_trunc('month', sbCustJoinDate)!= date_trunc('month', CURRENT_DATE)
+GROUP BY 
+  sbCustJoinMonth
+ORDER BY 
+  sbCustJoinMonth DESC;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedFunction) function _date_trunc(unknown, date) does not exist
+LINE 9: WHERE _date_trunc('month', sbCustJoinDate)!= date_trunc('mon...
+              ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT 
+  date_trunc('month', sbCustJoinDate) AS sbCustJoinMonth,
+  count(*) AS pmcs,
+  avg(sbTxPrice) AS pmat
+FROM 
+  sbCustomer
+JOIN 
+  sbTransaction ON sbCustomer.sbCustId = sbTransaction.sbTxCustId
+WHERE _date_trunc('month', sbCustJoinDate)!= date_trunc('month', CURRENT_DATE)
+GROUP BY 
+  sbCustJoinMonth
+ORDER BY 
+  sbCustJoinMonth DESC;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+broker,instructions_date_join,"Which customer made the highest number of transactions in the same month as they signed up? Return the customer's id, name and number of transactions.","
+Follow the instructions below to generate the query:
+If transactions from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date).
+","WITH active_customers AS (SELECT c.sbCustId, COUNT(t.sbTxId) AS num_transactions FROM sbCustomer c JOIN sbTransaction t ON c.sbCustId = t.sbTxCustId AND DATE_TRUNC('month', c.sbCustJoinDate) = DATE_TRUNC('month', t.sbTxDateTime) GROUP BY c.sbCustId) SELECT ac.sbCustId, c.sbCustName, ac.num_transactions FROM active_customers ac JOIN sbCustomer c ON ac.sbCustId = c.sbCustId ORDER BY ac.num_transactions DESC LIMIT 1","To analyze the performance of stocks, join the tables for daily prices and tickers, filter for a designated time frame, and calculate the change in price To get the total transaction amount by each customer, you should join the customer and transaction tables, group by the customer, and sum up the amounts of the transactions If transactions from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date). To identify the most popular stocks within a recent period, join the transaction table with the ticker table, filter for buy transactions during the last several days, group by the ticker symbol, and count the number of transactions.",postgres,"SELECT sbCustId, sbCustName, COUNT(*) AS transaction_count FROM sbCustomer
+JOIN sbTransaction ON sbCustomer.sbCustId = sbTransaction.sbTxCustId
+WHERE sbTransaction.sbTxDateTime >= DATE_TRUNC('month', CURRENT_DATE)
+AND sbTransaction.sbTxDateTime < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'
+GROUP BY sbCustId, sbCustName
+ORDER BY transaction_count DESC
+LIMIT 1;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_string_matching,"How many distinct customers with a .com email address bought stocks of FAANG companies (Amazon, Apple, Google, Meta or Netflix)?","
+Follow the instructions below to generate the query:
+Customers with a '.com' email address who bought FAANG stocks (ticker symbol contains 'AMZN', 'AAPL', 'GOOGL', 'META' or 'NFLX')
+",SELECT COUNT(DISTINCT t.sbTxCustId) FROM sbTransaction t JOIN sbCustomer c ON t.sbTxCustId = c.sbCustId JOIN sbTicker tk ON t.sbTxTickerId = tk.sbTickerId WHERE c.sbCustEmail LIKE '%.com' AND tk.sbTickerSymbol ~ '(AMZN|AAPL|GOOGL|META|NFLX)',"MoMC = month-over-month change in average closing price = (average closing price of given month - average closing price of previous month) / average closing price of previous month for each ticker. ACP = Average Closing Price of tickers within a defined time frame TAC = Total Active Customers who have joined since a specific starting date Customers with a '.com' email address who bought FAANG stocks (ticker symbol contains 'AMZN', 'AAPL', 'GOOGL', 'META' or 'NFLX')",postgres,"SELECT COUNT(DISTINCT sbCustId) FROM sbCustomer AS c
+JOIN sbTransaction AS t ON c.sbCustId  =  t.sbTxCustId
+JOIN sbTicker AS tk ON t.sbTxTickerId  =  tk.sbTickerId
+WHERE c.sbCustEmail LIKE '%.com' AND tk.sbTickerSymbol IN ('AMZN', 'AAPL', 'GOOGL', 'META', 'NFLX');",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,instructions_string_matching,"What is the number of customers whose name starts with J or ends with 'ez', and who live in a state ending with the letter 'a'?","
+Follow the instructions below to generate the query:
+all customer attributes should be matched case insensitively
+",SELECT COUNT(sbCustId) FROM sbCustomer WHERE (LOWER(sbCustName) LIKE 'j%' OR LOWER(sbCustName) LIKE '%ez') AND LOWER(sbCustState) LIKE '%a',"To get the total transaction amount per customer, join the customer and transaction tables, group by customer, and sum the transaction amounts To find the most popular stocks over a recent period, join the transaction and ticker tables, filter for buy transactions within that period, group by ticker, and count transactions. To analyze stock performance, join the daily price and ticker tables, filter for a specific date range, and calculate price change all customer attributes should be matched case insensitively",postgres,"SELECT count(*) FROM sbcustomer
+WHERE sbCustName ilike 'J%' OR sbCustName ilike '%ez' AND sbCustState ilike '%a';",,,0,0,0,0,0,,0,,,,,,,,,,,False
+broker,keywords_aggregate,"How many TAC are there from each country, for customers who joined on or after January 1, 2023? Return the country and the count.","
+Follow the instructions below to generate the query:
+TAC = Total Active Customers who joined on or after January 1, 2023
+","SELECT sbCustCountry, COUNT(sbCustId) AS TAC FROM sbCustomer WHERE sbCustJoinDate >= '2023-01-01' GROUP BY sbCustCountry","To analyze stock performance, join the daily price and stock symbol tables, filter for a designated date range, and compute the variation in price
+To calculate the success rate of transactions for each customer, merge the customer and transaction records, aggregate by customer, and assess the rate of successful transactions
+TAC = Total Active Customers who joined on or after January 1, 2023
+To ascertain the most sought-after stocks within a recent timeframe, combine the transaction and stock symbol datasets, focus on purchase actions during the specified period, group by stock symbol, and tally the transactions.",postgres,"SELECT sbCustCountry, COUNT(*) AS number_of_TAC FROM sbCustomer WHERE sbCustJoinDate >= '2023-01-01' GROUP BY sbCustCountry;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,keywords_aggregate,"What is the ACP for each ticker type in the past 7 days, inclusive of today? Return the ticker type and the average closing price.","
+Follow the instructions below to generate the query:
+ACP = Average Closing Price of tickers in the last 7 days, inclusive of today
+","SELECT sbTickerType, AVG(sbDpClose) AS ACP FROM sbDailyPrice JOIN sbTicker ON sbDailyPrice.sbDpTickerId = sbTicker.sbTickerId WHERE sbDpDate >= CURRENT_DATE - INTERVAL '7 days' GROUP BY sbTickerType","To determine the Activity Ratio (AR), divide the number of active customers by the total customer count and then multiply by 100, focusing on customers who joined within a particular year
+Customer Rank (CR) is determined by ranking customers based on their total transaction amount, with rank 1 assigned to the customer with the highest amount.
+To calculate Net Profit Margin (NPM), subtract the sum of tax and commission from the total amount obtained from sales, then divide by the total sales amount and multiply by 100, assessing transactions within a specific period
+ACP = Average Closing Price of tickers in the last 7 days, inclusive of today",postgres,"SELECT sbTickerType, avg(sbDpClose) FROM sbDailyPrice WHERE sbDpDate >= current_date - interval '7 days' AND sbDpDate <= current_date
+GROUP BY sbTickerType;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""sbtickertype"" does not exist
+LINE 1: SELECT sbTickerType, avg(sbDpClose) FROM sbDailyPrice WHERE ...
+               ^
+
+[SQL: SELECT sbTickerType, avg(sbDpClose) FROM sbDailyPrice WHERE sbDpDate >= current_date - interval '7 days' AND sbDpDate <= current_date
+GROUP BY sbTickerType;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+broker,keywords_ratio,What is the AR for each country for customers who joined in 2022? Return the country and AR.,"
+Follow the instructions below to generate the query:
+AR (Activity Ratio) = (Number of Active Customers with Transactions / Total Number of Customers with Transactions) * 100.
+","SELECT c.sbCustCountry,COALESCE(100.0 * COUNT(DISTINCT CASE WHEN c.sbCustStatus = 'active' THEN c.sbCustId END) / NULLIF(COUNT(DISTINCT t.sbTxCustId), 0), 0) AS AR FROM sbCustomer c JOIN sbTransaction t ON c.sbCustId = t.sbTxCustId WHERE c.sbCustJoinDate BETWEEN '2022-01-01' AND '2022-12-31' GROUP BY c.sbCustCountry","To get the total transaction amount per customer, join the customer and transaction tables, group by customer, and sum the transaction amounts If transactions from 2 different tables from the same interval are to be joined, join on the respective truncated date fields. AR (Activity Ratio) = (Number of Active Customers with Transactions / Total Number of Customers with Transactions) * 100. To analyze stock performance, join the daily price and ticker tables, filter for a specific date range, and calculate the price change",postgres,"SELECT sbCustCountry, 
+       (CAST(COUNT(CASE WHEN sbCustStatus = 'active' THEN 1 END) AS FLOAT) / NULLIF(COUNT(CASE WHEN sbCustStatus = 'active' THEN 1 END) + COUNT(CASE WHEN sbCustStatus!= 'active' THEN 1 END), 0)) * 100 AS AR
+FROM sbCustomer
+WHERE sbCustJoinDate >= '2022-01-01' AND sbCustJoinDate <= '2022-12-31'
+GROUP BY sbCustCountry;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+broker,keywords_ratio,"What is the SPM for each ticker symbol from sell transactions in the past month, inclusive of 1 month ago? Return the ticker symbol and SPM.","
+Follow the instructions below to generate the query:
+SPM (Selling Profit Margin) = (Total Amount from Sells - (Tax + Commission)) / Total Amount from Sells * 100
+","SELECT sbTickerSymbol, CASE WHEN SUM(sbTxAmount) = 0 THEN NULL ELSE (SUM(sbTxAmount) - SUM(sbTxTax + sbTxCommission)) / SUM(sbTxAmount) * 100 END AS SPM FROM sbTransaction JOIN sbTicker ON sbTransaction.sbTxTickerId = sbTicker.sbTickerId WHERE sbTxType = 'sell' AND sbTxDateTime >= CURRENT_DATE - INTERVAL '1 month' GROUP BY sbTickerSymbol;","To calculate the Total Active Customers who have recently joined, the Average Closing Price of tickers within a recent period, and the Customer Rank by their total transaction volume, you would need different queries and calculations that are not directly related to calculating the Net Profit Margin (NPM) for sell transactions of ticker symbols in the past month. ACP = Calculate the Average Closing Price of tickers over a chosen recent time span Analyze customer signups over a certain period.
+SPM (Selling Profit Margin) = (Total Amount from Sells - (Tax + Commission)) / Total Amount from Sells * 100
+TAC = Total Active Customers who joined within a specified timeframe
+CR = Rank customers by their total transaction volume, identifying the customer with the highest transaction volume as rank 1. This involves joining price data with ticker identifiers and filtering for a specified date range.",postgres,"SELECT sbTicker.sbTickerSymbol, 
+       (SUM(sbTransaction.sbTxAmount) - (SUM(sbTransaction.sbTxTax) + SUM(sbTransaction.sbTxCommission))) / NULLIF(SUM(sbTransaction.sbTxAmount), 0) * 100 AS SPM
+FROM sbTicker
+JOIN sbTransaction ON sbTransaction.sbTxTickerId = sbTicker.sbTickerId
+WHERE sbTransaction.sbTxType ='sell'
+AND sbTransaction.sbTxDateTime >= CURRENT_DATE - interval '1 month'
+GROUP BY sbTicker.sbTickerSymbol;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_join,"How many sales did each salesperson make in the past 30 days, inclusive of today's date? Return their ID, first name, last name and number of sales made, ordered from most to least sales.","
+Follow the instructions below to generate the query:
+To get the number of sales made by each salesperson in the past 30 days, join the salespersons and sales tables and filter for sales in the last 30 days.
+","WITH recent_sales AS (SELECT sp.id, sp.first_name, sp.last_name, COUNT(s.id) AS num_sales FROM salespersons sp LEFT JOIN sales s ON sp.id = s.salesperson_id WHERE s.sale_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY sp.id) SELECT id, first_name, last_name, num_sales FROM recent_sales ORDER BY num_sales DESC;WITH recent_sales AS (SELECT sp.id, sp.first_name, sp.last_name, COUNT(s.id) AS num_sales FROM salespersons sp LEFT JOIN sales s ON sp.id = s.salesperson_id AND s.sale_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY sp.id, sp.first_name, sp.last_name) SELECT id, first_name, last_name, num_sales FROM recent_sales ORDER BY num_sales DESC","When using car makes, model names, engine_type, and vin_number, ensure matching is case-insensitive and allows for partial matches using LIKE with wildcards.
+To get the number of sales made by each salesperson in the past 30 days, join the salespersons and sales tables and filter for sales in the last 30 days.
+ASP = Calculate the average sale price without specifying the period
+GPM = Define gross profit margin as a ratio without specifying how to calculate total revenue or total cost",postgres,"SELECT 
+  salespersons.id, 
+  salespersons.first_name, 
+  salespersons.last_name, 
+  COUNT(sales.id) AS number_of_sales
+FROM 
+  salespersons
+JOIN 
+  sales ON salespersons.id = sales.salesperson_id
+WHERE 
+  sales.sale_date >= (CURRENT_DATE - interval '30 days')
+GROUP BY 
+  salespersons.id, 
+  salespersons.first_name, 
+  salespersons.last_name
+ORDER BY 
+  number_of_sales DESC;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_join,"Return the highest sale price for each make and model of cars that have been sold and are no longer in inventory, ordered by the sale price from highest to lowest.","
+Follow the instructions below to generate the query:
+When getting a car's inventory status, always take the latest status from the inventory_snapshots table
+","WITH latest_inventory_status AS (SELECT car_id, is_in_inventory, ROW_NUMBER() OVER(PARTITION BY car_id ORDER BY snapshot_date DESC, crtd_ts DESC) AS rn FROM inventory_snapshots) SELECT c.make, c.model, MAX(s.sale_price) AS highest_sale_price FROM cars c JOIN sales s ON c.id = s.car_id JOIN latest_inventory_status lis ON c.id = lis.car_id WHERE lis.is_in_inventory = FALSE AND lis.rn = 1 GROUP BY c.make, c.model ORDER BY highest_sale_price DESC","TSC = Count of sales within a specified period
+MoM = Change in total receivable amounts from one month to the next, comparing with the immediately preceding month.
+ASP = Mean sale price for a designated start period
+When getting a car's inventory status, always take the latest status from the inventory_snapshots table",postgres,"SELECT c.make, c.model, max(s.sale_price)
+FROM cars c
+JOIN sales s ON c.id = s.car_id
+JOIN inventory_snapshots i ON c.id = i.car_id
+WHERE i.is_in_inventory = false
+GROUP BY c.make, c.model
+ORDER BY max(s.sale_price) DESC;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_join,"What is the average number of days between the sale date and payment received date, rounded to 2 decimal places?","
+Follow the instructions below to generate the query:
+When getting duration between sale and payment date for each sale, get the latest payment for sale by aggregating over the payments_received table first.
+","WITH sale_payments AS (SELECT s.id AS sale_id, s.sale_date, MAX(p.payment_date) AS latest_payment_date FROM sales s JOIN payments_received p ON s.id = p.sale_id GROUP BY 1,2) SELECT ROUND(AVG(latest_payment_date - sale_date), 2) AS avg_days_to_payment FROM sale_payments","When getting duration between sale and payment date for each sale, get the latest payment for sale by aggregating over the payments_received table first. ASP = Calculate the average price of sales within a specific timeframe Last 30 days = Use a range from the current date minus a certain interval to the current date, always ensure to make the necessary joins before utilizing the sales data. TSC = Count of sales within a specified period",postgres,"SELECT ROUND(AVG(extract(day FROM sale_date - payment_date))) AS average_days_between_sale_and_payment
+FROM sales
+JOIN payments_received ON sales.id = payments_received.sale_id;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedFunction) function pg_catalog.date_part(unknown, integer) does not exist
+LINE 1: SELECT ROUND(AVG(extract(day FROM sale_date - payment_date))...
+                         ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT ROUND(AVG(extract(day FROM sale_date - payment_date))) AS average_days_between_sale_and_payment
+FROM sales
+JOIN payments_received ON sales.id = payments_received.sale_id;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_join,"Who are the top 5 salespersons by total sales amount? Return their ID, first name, last name and total sales amount.","
+Follow the instructions below to generate the query:
+To get the total sales amount per salesperson, join the salespersons and sales tables, group by salesperson, and sum the sale_price.
+Always order results with NULLS last.
+","WITH salesperson_sales AS (SELECT s.id, s.first_name, s.last_name, SUM(sa.sale_price) AS total_sales FROM salespersons s LEFT JOIN sales sa ON s.id = sa.salesperson_id GROUP BY s.id) SELECT id, first_name, last_name, total_sales FROM salesperson_sales ORDER BY total_sales DESC NULLS LAST LIMIT 5","PMSR = per month sales revenue
+Always join sales with cars before using the sales table
+Weekend days are Saturday and Sunday
+Truncate date to month for aggregation
+Last 30 days = CURRENT_DATE - INTERVAL 'some time' to CURRENT_DATE
+PMSPS = per month salesperson signups
+To get the total sales amount per salesperson, join the salespersons and sales tables, group by salesperson, and sum the sale_price. Always order results with NULLS last.
+Truncate date to week for aggregation.",postgres,"SELECT s.id, s.first_name, s.last_name, sum(p.sale_price) AS total_sales_amount FROM sales AS s JOIN salespersons AS sp ON s.salesperson_id = sp.id JOIN payments_received AS p ON s.id = p.sale_id GROUP BY s.id, s.first_name, s.last_name ORDER BY total_sales_amount DESC NULLS LAST LIMIT 5;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column s.first_name does not exist
+LINE 1: SELECT s.id, s.first_name, s.last_name, sum(p.sale_price) AS...
+                     ^
+HINT:  Perhaps you meant to reference the column ""sp.first_name"".
+
+[SQL: SELECT s.id, s.first_name, s.last_name, sum(p.sale_price) AS total_sales_amount FROM sales AS s JOIN salespersons AS sp ON s.salesperson_id = sp.id JOIN payments_received AS p ON s.id = p.sale_id GROUP BY s.id, s.first_name, s.last_name ORDER BY total_sales_amount DESC NULLS LAST LIMIT 5;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_window,"Return the first name, last name, total sales amount, number of sales, and SR for each salesperson","
+Follow the instructions below to generate the query:
+SR = sales rank of each salesperson ordered by their total sales amount descending
+","WITH salesperson_sales AS (SELECT salesperson_id, SUM(sale_price) AS total_sales, COUNT(*) AS num_sales FROM sales GROUP BY salesperson_id) SELECT s.first_name, s.last_name, ss.total_sales, ss.num_sales, RANK() OVER (ORDER BY ss.total_sales DESC) AS sales_rank FROM salesperson_sales ss JOIN salespersons s ON ss.salesperson_id = s.id","SR = sales rank of each salesperson ordered by their total sales amount descending To determine the sales performance per territory, sum the sales amount and count the sales, grouping by territory To calculate the average sale price, join the sales table with itself on the salesperson_id and find the ratio of total sales amount to number of sales To assess inventory turnover, compare inventory snapshots with sales on matching days, focusing on the quantity of items sold.",postgres,"SELECT 
+  s.first_name, 
+  s.last_name, 
+  sum(s.sale_price) AS total_sales_amount, 
+  count(*) AS number_of_sales, 
+  row_number() OVER (ORDER BY sum(s.sale_price) DESC) AS sales_rank
+FROM 
+  sales AS s
+JOIN 
+  salespersons AS sp ON s.salesperson_id = sp.id
+GROUP BY 
+  s.first_name, 
+  s.last_name;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column s.first_name does not exist
+LINE 2:   s.first_name, 
+          ^
+HINT:  Perhaps you meant to reference the column ""sp.first_name"".
+
+[SQL: SELECT 
+  s.first_name, 
+  s.last_name, 
+  sum(s.sale_price) AS total_sales_amount, 
+  count(*) AS number_of_sales, 
+  row_number() OVER (ORDER BY sum(s.sale_price) DESC) AS sales_rank
+FROM 
+  sales AS s
+JOIN 
+  salespersons AS sp ON s.salesperson_id = sp.id
+GROUP BY 
+  s.first_name, 
+  s.last_name;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_cte_window,What is the total payments received per month? Also calculate the MoM change for each month.,"
+Follow the instructions below to generate the query:
+MoM change = (current month value - prev month value).
+Return months with no payments as 0.
+MoM will always be zero for the first month that appears in your answer.
+","WITH monthly_totals AS (SELECT DATE_TRUNC('month', payment_date) AS dt, SUM(payment_amount) AS total_payments FROM payments_received GROUP BY dt), monthly_range AS (SELECT generate_series(DATE_TRUNC('month', MIN(payment_date)), DATE_TRUNC('month', MAX(payment_date)), '1 month'::interval) AS dt FROM payments_received), monthly_totals_with_zero AS (SELECT mr.dt, COALESCE(mt.total_payments, 0) AS total_payments FROM monthly_range mr LEFT JOIN monthly_totals mt ON mr.dt = mt.dt) SELECT m.dt::DATE AS MONTH, m.total_payments, m.total_payments - lag(m.total_payments, 1) OVER (ORDER BY dt) AS mom_change FROM monthly_totals_with_zero m ORDER BY m.dt;WITH monthly_payments AS (SELECT DATE_TRUNC('month', pr.payment_date) AS MONTH, SUM(pr.payment_amount) AS total_payments FROM payments_received pr GROUP BY MONTH ORDER BY MONTH), monthly_range AS (SELECT generate_series(DATE_TRUNC('month', MIN(pr.payment_date)), DATE_TRUNC('month', MAX(pr.payment_date)), '1 month'::interval) AS MONTH FROM payments_received pr), monthly_payments_with_zeros AS (SELECT mr.month, COALESCE(mp.total_payments, 0) AS total_payments FROM monthly_range mr LEFT JOIN monthly_payments mp ON mr.month = mp.month) SELECT mp.month, mp.total_payments, COALESCE(mp.total_payments - lag(mp.total_payments, 1) OVER (ORDER BY mp.month), 0) AS mom_change FROM monthly_payments_with_zeros mp ORDER BY mp.month;","To ascertain the volume of sales conducted by each salesperson over a recent period, merge the salespersons and sales tables, applying a filter for recent sales transactions.
+To determine the average duration from sale date to payment date, perform a join between the sales and payments tables
+To calculate the average selling price, join the sales and products tables, group by product name, and compute the ratio of total sales amount to the number of sales
+MoM change = (current month value - prev month value). Return months with no payments as 0.",postgres,"SELECT 
+  date_trunc('month', payment_date) AS payment_month, 
+  sum(payment_amount) AS total_payments, 
+  CASE 
+    WHEN payment_month = date_trunc('month', CURRENT_DATE) THEN 0 
+    ELSE (sum(payment_amount) - LAG(sum(payment_amount)) OVER (ORDER BY payment_month)) / NULLIF(sum(payment_amount) - LAG(sum(payment_amount)) OVER (PARTITION BY date_trunc('month', payment_date) - date_trunc('month', CURRENT_DATE) ORDER BY payment_month), 0) 
+  END AS MoM_change
+FROM 
+  payments_received
+GROUP BY 
+  payment_month
+ORDER BY 
+  payment_month;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""payment_month"" does not exist
+LINE 5:     WHEN payment_month = date_trunc('month', CURRENT_DATE) T...
+                 ^
+HINT:  Perhaps you meant to reference the column ""payments_received.payment_amount"".
+
+[SQL: SELECT 
+  date_trunc('month', payment_date) AS payment_month, 
+  sum(payment_amount) AS total_payments, 
+  CASE 
+    WHEN payment_month = date_trunc('month', CURRENT_DATE) THEN 0 
+    ELSE (sum(payment_amount) - LAG(sum(payment_amount)) OVER (ORDER BY payment_month)) / NULLIF(sum(payment_amount) - LAG(sum(payment_amount)) OVER (PARTITION BY date_trunc('month', payment_date) - date_trunc('month', CURRENT_DATE) ORDER BY payment_month), 0) 
+  END AS MoM_change
+FROM 
+  payments_received
+GROUP BY 
+  payment_month
+ORDER BY 
+  payment_month;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_date_join,"For sales with sale price over $30,000, how many payments were received in total and on weekends in each of the last 8 calendar weeks (excluding the current week)? Return the week (as a date), total payments received, and weekend payments received in ascending order.","
+Follow the instructions below to generate the query:
+Weekend days are Saturday (6) and Sunday (0).
+Truncate date to week for aggregation.
+","SELECT DATE_TRUNC('week', p.payment_date) AS WEEK, COUNT(p.id) AS total_payments, COUNT(CASE WHEN EXTRACT(dow FROM p.payment_date) IN (0, 6) THEN 1 END) AS weekend_payments FROM payments_received p JOIN sales s ON p.sale_id = s.id WHERE s.sale_price > 30000 AND p.payment_date >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '8 weeks' AND p.payment_date < DATE_TRUNC('week', CURRENT_DATE) GROUP BY WEEK ORDER BY WEEK","To calculate the average days between sale date and payment received date, join the sales and payments received tables Weekend days are Saturday (6) and Sunday (0). Truncate date to week for aggregation. When using car makes, model names, engine_type and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards. To get the total sales amount per salesperson, join the salespersons and sales tables, group by salesperson, and sum the sale_price",postgres,"SELECT 
+  to_char(payment_date, 'W')::integer AS week, 
+  count(*) FILTER (WHERE payment_method  =  'check') AS total_checks, 
+  count(*) FILTER (WHERE payment_method  =  'cash') AS total_cash,
+  count(*) FILTER (WHERE payment_method  =  'bank_transfer') AS total_bank_transfers,
+  count(*) FILTER (WHERE payment_method  =  'card') AS total_credit_cards,
+  count(*) FILTER (WHERE payment_method  =  'trf01') AS total_trf01,
+  count(*) FILTER (WHERE payment_method  =  'trf02') AS total_trf02,
+  count(*) FILTER (WHERE payment_method  =  'trf03') AS total_trf03,
+  count(*) FILTER (WHERE payment_method  =  'trf04') AS total_trf04,
+  count(*) FILTER (WHERE payment_method  =  'trf05') AS total_trf05,
+  count(*) FILTER (WHERE payment_method  =  'trf06') AS total_trf06,
+  count(*) FILTER (WHERE payment_method  =  'trf07') AS total_trf07,
+  count(*) FILTER (WHERE payment_method  =  'trf08') AS total_trf08,
+  count(*) FILTER (WHERE payment_method  =  'trf09') AS total_trf09,
+  count(*) FILTER (WHERE payment_method  =  'trf10') AS total_trf10,
+  count(*) FILTER (WHERE payment_method  =  'trf11') AS total_trf11,
+  count(*) FILTER (WHERE payment_method  =  'trf12') AS total_trf12,
+  count(*) FILTER (WHERE payment_method  =  'trf13') AS total_trf13,
+  count(*) FILTER (WHERE payment_method  =  'trf14') AS total_trf14,
+  count(*) FILTER (WHERE payment_method  =  'trf15') AS total_trf15,
+  count(*) FILTER (WHERE payment_method  =  'trf16') AS total_trf16,
+  count(*) FIL;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""payment_date"" does not exist
+LINE 2:   to_char(payment_date, 'W')::integer AS week, 
+                  ^
+
+[SQL: SELECT 
+  to_char(payment_date, 'W')::integer AS week, 
+  count(*) FILTER (WHERE payment_method  =  'check') AS total_checks, 
+  count(*) FILTER (WHERE payment_method  =  'cash') AS total_cash,
+  count(*) FILTER (WHERE payment_method  =  'bank_transfer') AS total_bank_transfers,
+  count(*) FILTER (WHERE payment_method  =  'card') AS total_credit_cards,
+  count(*) FILTER (WHERE payment_method  =  'trf01') AS total_trf01,
+  count(*) FILTER (WHERE payment_method  =  'trf02') AS total_trf02,
+  count(*) FILTER (WHERE payment_method  =  'trf03') AS total_trf03,
+  count(*) FILTER (WHERE payment_method  =  'trf04') AS total_trf04,
+  count(*) FILTER (WHERE payment_method  =  'trf05') AS total_trf05,
+  count(*) FILTER (WHERE payment_method  =  'trf06') AS total_trf06,
+  count(*) FILTER (WHERE payment_method  =  'trf07') AS total_trf07,
+  count(*) FILTER (WHERE payment_method  =  'trf08') AS total_trf08,
+  count(*) FILTER (WHERE payment_method  =  'trf09') AS total_trf09,
+  count(*) FILTER (WHERE payment_method  =  'trf10') AS total_trf10,
+  count(*) FILTER (WHERE payment_method  =  'trf11') AS total_trf11,
+  count(*) FILTER (WHERE payment_method  =  'trf12') AS total_trf12,
+  count(*) FILTER (WHERE payment_method  =  'trf13') AS total_trf13,
+  count(*) FILTER (WHERE payment_method  =  'trf14') AS total_trf14,
+  count(*) FILTER (WHERE payment_method  =  'trf15') AS total_trf15,
+  count(*) FILTER (WHERE payment_method  =  'trf16') AS total_trf16,
+  count(*) FIL;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_date_join,How many Toyota cars were sold in the last 30 days inclusive of today? Return the number of sales and total revenue.,"
+Follow the instructions below to generate the query:
+Last 30 days = CURRENT_DATE - INTERVAL '30 days' to CURRENT_DATE.
+Always join sales with cars before using the sales table.
+","SELECT COUNT(s.id) AS num_sales, SUM(s.sale_price) AS total_revenue FROM sales s JOIN cars c ON s.car_id = c.id WHERE c.make = 'Toyota' AND s.sale_date BETWEEN CURRENT_DATE - INTERVAL '30 days' AND CURRENT_DATE","To calculate the average days between sale date and payment received date, join the sales and payments_received tables
+To get the list of cars that were sold and their sale price, join the cars and sales tables
+Last 30 days = CURRENT_DATE - INTERVAL '30 days' to CURRENT_DATE. Always join sales with cars before using the sales table.
+When using car makes, model names, engine_type, and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards.",postgres,"SELECT 
+  count(*), 
+  sum(s.sale_price) 
+FROM 
+  sales AS s 
+JOIN 
+  cars AS c ON s.car_id  =  c.id 
+WHERE 
+  c.make ILIKE '%Toyota%' AND s.sale_date >= CURRENT_DATE - INTERVAL '30 days' AND s.sale_date <= CURRENT_DATE;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,instructions_date_join,"What are the PMSPS and PMSR in the last 6 months excluding the current month, for salespersons hired between 2022 and 2023 (both inclusive)? Include months where metrics are 0. Order by month ascending.","
+Follow the instructions below to generate the query:
+PMSPS = per month salesperson sales count.
+PMSR = per month sales revenue in dollars.
+Truncate date to month for aggregation.
+","WITH date_range AS (SELECT generate_series(date_trunc('month', CURRENT_DATE - interval '6 months'), date_trunc('month', CURRENT_DATE - interval '1 month'), '1 month')::DATE AS month_start), sales_metrics AS (SELECT date_trunc('month', s.sale_date) AS sale_month, COUNT(s.id) AS PMSPS, SUM(s.sale_price) AS PMSR FROM sales s JOIN salespersons sp ON s.salesperson_id = sp.id WHERE EXTRACT(YEAR FROM sp.hire_date) BETWEEN 2022 AND 2023 AND s.sale_date >= date_trunc('month', CURRENT_DATE - interval '6 months') AND s.sale_date < date_trunc('month', CURRENT_DATE) GROUP BY sale_month) SELECT dr.month_start, COALESCE(sm.PMSPS, 0) AS PMSPS, COALESCE(sm.PMSR, 0) AS PMSR FROM date_range dr LEFT JOIN sales_metrics sm ON dr.month_start = sm.sale_month ORDER BY dr.month_start ASC","PMSPS = per month salesperson sales count. PMSR = per month sales revenue in dollars. Truncate date to month for aggregation.
+ASP = Average Sale Price during a specific timeframe
+To calculate the average days between a sale date and when the payment was received, join the relevant tables.
+TSC = Total Sales Count for a given period",postgres,"SELECT 
+  date_trunc('month', s.sale_date) AS month,
+  count(DISTINCT s.salesperson_id) AS pmsps,
+  sum(s.sale_price) AS pmsr
+FROM 
+  sales AS s
+JOIN 
+  salespersons AS sp ON s.salesperson_id = sp.id
+WHERE 
+  s.sale_date >= date_trunc('month', CURRENT_DATE) - interval '6 months'
+  AND s.sale_date < date_trunc('month', CURRENT_DATE)
+  AND sp.hire_date >= date_trunc('year', '2022-01-01')
+  AND sp.hire_date <= date_trunc('year', '2023-12-31')
+GROUP BY 
+  month
+ORDER BY 
+  month ASC;",,"QUERY EXECUTION ERROR: (psycopg2.errors.AmbiguousFunction) function date_trunc(unknown, unknown) is not unique
+LINE 12:   AND sp.hire_date >= date_trunc('year', '2022-01-01')
+                               ^
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.
+
+[SQL: SELECT 
+  date_trunc('month', s.sale_date) AS month,
+  count(DISTINCT s.salesperson_id) AS pmsps,
+  sum(s.sale_price) AS pmsr
+FROM 
+  sales AS s
+JOIN 
+  salespersons AS sp ON s.salesperson_id = sp.id
+WHERE 
+  s.sale_date >= date_trunc('month', CURRENT_DATE) - interval '6 months'
+  AND s.sale_date < date_trunc('month', CURRENT_DATE)
+  AND sp.hire_date >= date_trunc('year', '2022-01-01')
+  AND sp.hire_date <= date_trunc('year', '2023-12-31')
+GROUP BY 
+  month
+ORDER BY 
+  month ASC;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_date_join,"What is the make, model and sale price of the car with the highest sale price that was sold on the same day it went out of inventory?","
+Follow the instructions below to generate the query:
+If inventory snapshots and sales from the same day are to be joined, join on the truncated date fields eg FROM inventory_snapshots i JOIN sales s ON DATE_TRUNC('day', i.snapshot_date) = DATE_TRUNC('day', s.sale_date).
+","SELECT c.make, c.model, s.sale_price FROM cars c JOIN sales s ON c.id = s.car_id JOIN inventory_snapshots i ON c.id = i.car_id AND DATE_TRUNC('day', s.sale_date) = DATE_TRUNC('day', i.snapshot_date) WHERE i.is_in_inventory = FALSE ORDER BY s.sale_price DESC LIMIT 1","ASP (average selling price) = total sales amount / number of sales
+To calculate the gross profit margin, join the appropriate tables and calculate the margin
+If inventory snapshots and sales from the same day are to be joined, join on the truncated date fields eg FROM inventory_snapshots i JOIN sales s ON DATE_TRUNC('day', i.snapshot_date) = DATE_TRUNC('day', s.sale_date).
+To rank salespersons by their sales volume, join the salespersons and sales data, order by sales volume.
+
+So, the rephrased instructions would be: ""GPM (gross profit margin) = (total revenue - total cost) / total cost * 100
+To determine the average sale price, join the sales data and calculate the average
+SR = sales rank of each salesperson ordered by their total sales amount descending.""",postgres,"SELECT c.make, c.model, s.sale_price FROM cars c JOIN sales s ON c.id = s.car_id WHERE s.sale_date = (SELECT max(sale_date) FROM sales) AND s.is_in_inventory IS TRUE;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column s.is_in_inventory does not exist
+LINE 1: ...ale_date = (SELECT max(sale_date) FROM sales) AND s.is_in_in...
+                                                             ^
+
+[SQL: SELECT c.make, c.model, s.sale_price FROM cars c JOIN sales s ON c.id = s.car_id WHERE s.sale_date = (SELECT max(sale_date) FROM sales) AND s.is_in_inventory IS TRUE;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,instructions_string_matching,"How many sales were made for each car model that has 'M5' in its VIN number? Return the make, model and number of sales.","
+Follow the instructions below to generate the query:
+When using car makes, model names, engine_type and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards.
+","SELECT c.make, c.model, COUNT(s.id) AS num_sales FROM cars c LEFT JOIN sales s ON c.id = s.car_id WHERE LOWER(c.vin_number) LIKE '%m5%' GROUP BY c.make, c.model","To determine the total sales amount for each salesperson, combine data from the salespersons and sales tables, grouping by salesperson and summing the sale_price
+When using car makes, model names, engine_type and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards.
+To calculate the average selling price, join the sales and cars tables, and divide the total sales amount by the number of sales
+For understanding the number of sales achieved by each salesperson within a specified period, merge the salespersons and sales tables and apply a filter based on the given time frame.",postgres,"SELECT c.make, c.model, COUNT(s.id) AS number_of_sales
+FROM cars AS c
+JOIN sales AS s ON c.id = s.car_id
+WHERE c.vin_number ILIKE '%M5%'
+GROUP BY c.make, c.model;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,instructions_string_matching,"What are the details and average sale price for cars that have 'Ford' in their make name or 'Mustang' in the model name? Return make, model, year, color, vin_number and avg_sale_price.","
+Follow the instructions below to generate the query:
+When using car makes, model names, engine_type and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards.
+","SELECT c.make, c.model, c.year, c.color, c.vin_number, AVG(s.sale_price) AS avg_sale_price FROM cars c JOIN sales s ON c.id = s.car_id WHERE LOWER(c.make) LIKE '%ford%' OR LOWER(c.model) LIKE '%mustang%' GROUP BY c.make, c.model, c.year, c.color, c.vin_number","To calculate the gross profit margin, use the formula where GPM is the quotient of total revenue minus total cost over total cost, multiplied by 100 When using car makes, model names, engine_type and vin_number, match case-insensitively and allow partial matches using LIKE with wildcards. To compute the average sales price, divide the total sales amount by the number of sales To determine the sales rank of each salesperson, order by their total sales amount in descending order.",postgres,"SELECT 
+  c.make, 
+  c.model, 
+  c.year, 
+  c.color, 
+  c.vin_number, 
+  avg(s.sale_price) AS avg_sale_price
+FROM 
+  cars AS c
+JOIN 
+  sales AS s ON c.id = s.car_id
+WHERE 
+  c.make ILIKE '%Ford%' OR c.model ILIKE '%Mustang%'
+GROUP BY 
+  c.make, 
+  c.model, 
+  c.year, 
+  c.color, 
+  c.vin_number;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,keywords_aggregate,What is the ASP for sales made in the first quarter of 2023?,"
+Follow the instructions below to generate the query:
+ASP = Average Sale Price in the first quarter of 2023.
+",SELECT AVG(sale_price) AS ASP FROM sales WHERE sale_date >= '2023-01-01' AND sale_date <= '2023-03-31',"Always join sales with cars before using the sales table. ASP = Average Sale Price in the first quarter of 2023. To calculate the average days between sale date and payment received date, join the sales and payments tables To get the list of cars that were sold along with their sale prices, join the cars and sales tables Last 30 days = CURRENT_DATE - INTERVAL 'last month' days to CURRENT_DATE",postgres,SELECT avg(sale_price) FROM sales WHERE EXTRACT(MONTH FROM sale_date) BETWEEN 1 AND 3;,,,1,1,0,0,0,,0,,,,,,,,,,,False
+car_dealership,keywords_aggregate,"What is the TSC in the past 7 days, inclusive of today?","
+Follow the instructions below to generate the query:
+TSC = Total Sales Count.
+",SELECT COUNT(id) AS TSC FROM sales WHERE sale_date >= CURRENT_DATE - INTERVAL '7 days',"To determine the average selling price, divide the total sales amount by the number of sales
+To calculate the gross profit margin, subtract the total cost from the total revenue, then divide by the total cost and multiply by 100
+To ascertain the sales rank of each salesperson, order them by their total sales amount in descending order.
+TSC = Total Sales Count.",postgres,"SELECT sum(t3.car_id) FROM cars AS t1
+JOIN sales AS t2 ON t1.id  =  t2.car_id
+JOIN salespersons AS t3 ON t2.salesperson_id  =  t3.id
+WHERE t2.sale_date >= CURRENT_DATE - interval '7' days
+AND t2.sale_date <= CURRENT_DATE;",,"QUERY EXECUTION ERROR: (psycopg2.errors.SyntaxError) syntax error at or near ""days""
+LINE 4: WHERE t2.sale_date >= CURRENT_DATE - interval '7' days
+                                                          ^
+
+[SQL: SELECT sum(t3.car_id) FROM cars AS t1
+JOIN sales AS t2 ON t1.id  =  t2.car_id
+JOIN salespersons AS t3 ON t2.salesperson_id  =  t3.id
+WHERE t2.sale_date >= CURRENT_DATE - interval '7' days
+AND t2.sale_date <= CURRENT_DATE;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+car_dealership,keywords_ratio,What is the GPM for all car sales in 2023?,"
+Follow the instructions below to generate the query:
+GPM (gross profit margin) = (total revenue - total cost) / total cost * 100
+",SELECT (SUM(sale_price) - SUM(cars.cost)) / SUM(cars.cost) * 100 AS gpm FROM sales JOIN cars ON sales.car_id = cars.id WHERE EXTRACT(YEAR FROM sale_date) = 2023,"Analyze salesperson activity over a selected period by connecting salespersons with sales records
+GPM (gross profit margin) = (total revenue - total cost) / total cost * 100
+For weekly trends, consider the start of the week
+To calculate the TSC = Total Sales Count within a given period
+Identify sold vehicles and pricing by linking car and sales data
+MoM = assess the month-over-month change in total financial transactions
+SR = sales rank of each salesperson based on their total sales without specifying the order
+Utilize LIKE for flexible matching in vehicle information queries.
+Use inventory and sales data for concurrent analysis, ensuring date alignment
+To summarize sales performance, combine sales and salesperson data, focusing on total sales
+PMSPS and PMSR aim to measure salesperson engagement and monthly revenue, respectively
+For insights on sale to payment duration, correlate sales with payment dates
+To find the ASP = Average Sale Price for a specific time frame
+For timing analysis, apply specific date intervals",postgres,"SELECT 
+  CAST(SUM(s.sale_price) AS NUMERIC) / NULLIF(SUM(s.car_id), 0) AS gross_profit_margin
+FROM 
+  sales AS s
+JOIN 
+  cars AS c ON s.car_id = c.id
+WHERE 
+  s.sale_date >= '2023-01-01' AND s.sale_date <= '2023-12-31';",,,0,0,0,0,0,,0,,,,,,,,,,,False
+car_dealership,keywords_ratio,"Who are the top 3 salespersons by ASP? Return their first name, last name and ASP.","
+Follow the instructions below to generate the query:
+ASP (average selling price) = total sales amount / number of sales
+","SELECT salespersons.first_name, salespersons.last_name, AVG(sales.sale_price) AS ASP FROM sales JOIN salespersons ON sales.salesperson_id = salespersons.id GROUP BY salespersons.first_name, salespersons.last_name ORDER BY ASP DESC NULLS LAST LIMIT 3","To get the total sales amount per salesperson, join the salespersons and sales tables, group by salesperson, and sum the sale_amount. To calculate the average days between the sale date and payment received date, join the sales and payments_received tables. ASP (average selling price) = total sales amount / number of sales. To get the list of cars that were sold and their sale price, join the cars and sales tables.",postgres,"SELECT T1.first_name,  T1.last_name,  T1.asp FROM salespersons AS T1 ORDER BY T1.asp DESC LIMIT 3;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column t1.asp does not exist
+LINE 1: SELECT T1.first_name,  T1.last_name,  T1.asp FROM salesperso...
+                                              ^
+
+[SQL: SELECT T1.first_name,  T1.last_name,  T1.asp FROM salespersons AS T1 ORDER BY T1.asp DESC LIMIT 3;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_join,How many patients have been diagnosed with 'Psoriasis vulgaris' and treated with a biologic drug? Return the distinct count of patients.,"
+Follow the instructions below to generate the query:
+To find the number of patients who have been diagnosed with a specific type of psoriasis and treated with a biologic drug, first join patients with treatments on patient_id, then join with diagnoses on diag_id, filtering by diagnosis and drug type.
+",WITH patient_diagnosis_treatment AS (SELECT p.patient_id FROM patients p JOIN treatments t ON p.patient_id = t.patient_id JOIN diagnoses d ON t.diag_id = d.diag_id JOIN drugs dr ON t.drug_id = dr.drug_id WHERE d.diag_name = 'Psoriasis vulgaris' AND dr.drug_type = 'biologic') SELECT COUNT(DISTINCT patient_id) FROM patient_diagnosis_treatment,"TPC: Determine the total count of female patients To find the number of patients who have been diagnosed with a specific type of psoriasis and treated with a biologic drug, first join patients with treatments on patient_id, then join with diagnoses on diag_id, filtering by diagnosis and drug type. D7D100PIR: Compute the improvement rate of the PASI score from day 7 to day 100, considering only patients with available PASI scores for both days. AWF: Calculate the mean weight for male patients in kilograms",postgres,SELECT COUNT(DISTINCT T1.patient_id) FROM patients AS T1 JOIN treatments AS T2 ON T1.patient_id  =  T2.patient_id JOIN drugs AS T3 ON T2.drug_id  =  T3.drug_id JOIN diagnoses AS T4 ON T2.diag_id  =  T4.diag_id WHERE T4.diag_name  =  'Psoriasis vulgaris' AND T3.drug_type  =  'biologic';,,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_join,"I want the adverse events that have been reported for treatments involving topical drugs. Give me the description, treatment id, drug id and name.","
+Follow the instructions below to generate the query:
+To get adverse events reported for treatments involving certain drugs, first join treatments with adverse_events on treatment_id, then join with drugs on drug_id to filter on the specific drug(s).
+","SELECT a.description, a.treatment_id, d.drug_id, d.drug_name FROM adverse_events a JOIN treatments t ON a.treatment_id = t.treatment_id JOIN drugs d ON t.drug_id = d.drug_id WHERE d.drug_type = 'topical'","AWF = Average weight of female patients (kg)
+PASI improvement rate is calculated as ((average PASI score on day 100 - average PASI score on day 7) / average PASI score on day 7) * 100, including only patients with non-null PASI scores at both timepoints.
+To calculate the total number of adverse events reported for treatments involving topical drugs, first join treatments with adverse_events on treatment_id, then filter by the drug type.
+TPC = total patient count",postgres,"SELECT T2.description,  T1.treatment_id,  T1.drug_id,  T3.drug_name FROM adverse_events AS T1 JOIN treatments AS T2 ON T1.treatment_id  =  T2.treatment_id JOIN drugs AS T3 ON T2.drug_id  =  T3.drug_id WHERE T3.drug_type  =  'topical';",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column t2.description does not exist
+LINE 1: SELECT T2.description,  T1.treatment_id,  T1.drug_id,  T3.dr...
+               ^
+HINT:  Perhaps you meant to reference the column ""t1.description"".
+
+[SQL: SELECT T2.description,  T1.treatment_id,  T1.drug_id,  T3.drug_name FROM adverse_events AS T1 JOIN treatments AS T2 ON T1.treatment_id  =  T2.treatment_id JOIN drugs AS T3 ON T2.drug_id  =  T3.drug_id WHERE T3.drug_type  =  'topical';]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_join,What is the average weight in kg of patients treated with the drug named 'Drugalin'? Return the average weight.,"
+Follow the instructions below to generate the query:
+To find the average weight of patients treated with a specific drug, first join patients with treatments on patient_id, then filter by the drug name.
+","WITH patient_treatment AS (SELECT p.patient_id, p.weight_kg FROM patients p JOIN treatments t ON p.patient_id = t.patient_id WHERE t.drug_id = (SELECT drug_id FROM drugs WHERE drug_name = 'Drugalin')) SELECT AVG(weight_kg) FROM patient_treatment","To find the average weight of patients treated with a specific drug, first join patients with treatments on patient_id, then filter by the drug name.
+PMPD = Determine the number of diagnoses made for patients each month.
+DDD = Compute the overall consumed medication amount divided by the total number of treatment days
+AWF = Calculate the average weight in kilograms for patients identified as male",postgres,SELECT avg(weight_kg) FROM treatments AS T1 JOIN patients AS T2 ON T1.patient_id  =  T2.patient_id JOIN drugs AS T3 ON T1.drug_id  =  T3.drug_id WHERE T3.drug_name ILIKE '%Drugalin%';,,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_join,Which states do doctors who have prescribed biologic drugs reside in? Return the distinct states.,"
+Follow the instructions below to generate the query:
+To identify doctors who have prescribed a certain drug type and their respective states, first join doctors with treatments on doc_id, then filter by the drug type.
+","WITH doctor_treatment AS (SELECT d.doc_id, d.loc_state FROM doctors d JOIN treatments t ON d.doc_id = t.doc_id JOIN drugs dr ON t.drug_id = dr.drug_id WHERE dr.drug_type = 'biologic') SELECT DISTINCT loc_state FROM doctor_treatment","AWF = average weight for male patients TPC = total count of female patients Each of these metrics, while providing valuable insights for other analyses, would not alter the scope or outcome of the provided SQL query aimed at identifying states with doctors who have prescribed biologic drugs. PMPD = counts of patient diagnoses per month To identify doctors who have prescribed a certain drug type and their respective states, first join doctors with treatments on doc_id, then filter by the drug type.",postgres,SELECT DISTINCT loc_state FROM doctors JOIN treatments ON doctors.doc_id = treatments.doc_id WHERE drug_id IN (SELECT drug_id FROM drugs WHERE drug_type ILIKE 'biologic');,,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_window,"Return each doctor's doc_id, specialty, number of distinct drugs prescribed, and SDR","
+Follow the instructions below to generate the query:
+SDR = a doctor's rank within their specialty by number of distinct drugs prescribed.
+Doctors prescribing more drugs will have a higher rank
+","WITH doc_drug_counts AS (SELECT d.doc_id, d.specialty, COUNT(DISTINCT t.drug_id) AS num_drugs_prescribed FROM doctors d JOIN treatments t ON d.doc_id = t.doc_id GROUP BY d.doc_id) SELECT doc_id, specialty, num_drugs_prescribed, DENSE_RANK() OVER (PARTITION BY specialty ORDER BY num_drugs_prescribed DESC) AS specialty_drug_rank FROM doc_drug_counts","To calculate the average weight of all patients who have been given a certain medication, join the patients and treatments tables on the patient's ID, then apply a filter for the specific medication To discover physicians who have prescribed a particular type of medication and identify their locations, link the doctors and treatments tables via the doctor's ID, then use a condition to filter by the medication type To ascertain the total count of adverse reactions recorded for treatments that involve topical medications, merge the treatments and adverse_events tables using the treatment ID, and apply a filter for the medication type. SDR = a doctor's rank within their specialty by number of distinct drugs prescribed, with doctors prescribing the most distinct drugs having rank 1",postgres,"SELECT 
+  d.doc_id, 
+  d.specialty, 
+  COUNT(DISTINCT t.drug_id) AS num_drugs_prescribed, 
+  CASE 
+    WHEN COUNT(DISTINCT t.drug_id) > 1 THEN 'SDR'
+    ELSE 'Not SDR'
+  END AS sdr
+FROM 
+  doctors AS d
+JOIN 
+  treatments AS t ON d.doc_id = t.doc_id
+GROUP BY 
+  d.doc_id, 
+  d.specialty
+ORDER BY 
+  d.specialty, 
+  num_drugs_prescribed DESC;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_cte_window,"What is the NPI for each year? Return the year, number of new patients, and NPI","
+Follow the instructions below to generate the query:
+NPI (new patients increase) = the increase in number of new patients compared to the previous year.
+New patients are defined as patients starting their first treatment and require joining the patients table with the earliest record of each patient from the treatment table on patient_id
+","WITH FirstTreatment AS (SELECT p.patient_id, MIN(t.start_dt) AS first_treatment_date FROM patients p JOIN treatments t ON p.patient_id = t.patient_id GROUP BY p.patient_id), NewPatientsPerYear AS (SELECT EXTRACT(YEAR FROM first_treatment_date) AS YEAR, COUNT(patient_id) AS new_patients FROM FirstTreatment GROUP BY EXTRACT(YEAR FROM first_treatment_date)), NPI AS (SELECT YEAR, new_patients, new_patients - LAG(new_patients, 1) OVER (ORDER BY YEAR) AS npi FROM NewPatientsPerYear) SELECT YEAR, new_patients, npi FROM NPI ORDER BY YEAR","NPI (new patients increase) = the increase in number of new patients compared to the previous year. New patients are defined as patients starting their first treatment and require joining the patients table with the earliest record of each patient from the treatment table on patient_id
+If events from two different sources need to be linked based on time, it's advised to align them by truncating both dates to the same interval for the join condition.
+To find the average weight of patients treated with any drug, join the patients and treatments tables using patient_id, then filter as needed by the drug
+To identify doctors who have prescribed any drug type along with their states, join the doctors with treatments on doc_id, then apply the necessary filter for the drug type",postgres,"SELECT 
+  YEAR(t.start_dt) AS YEAR, 
+  COUNT(DISTINCT p.patient_id) AS NEW_PATIENTS, 
+  d.doc_id AS NPI
+FROM 
+  patients p
+JOIN 
+  doctors d ON p.patient_id = d.patient_id
+JOIN 
+  treatments t ON p.patient_id = t.patient_id
+WHERE 
+  p.date_of_registration >= d.year_reg
+GROUP BY 
+  YEAR(t.start_dt), 
+  d.doc_id
+ORDER BY 
+  YEAR;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column d.patient_id does not exist
+LINE 8:   doctors d ON p.patient_id = d.patient_id
+                                      ^
+HINT:  Perhaps you meant to reference the column ""p.patient_id"".
+
+[SQL: SELECT 
+  YEAR(t.start_dt) AS YEAR, 
+  COUNT(DISTINCT p.patient_id) AS NEW_PATIENTS, 
+  d.doc_id AS NPI
+FROM 
+  patients p
+JOIN 
+  doctors d ON p.patient_id = d.patient_id
+JOIN 
+  treatments t ON p.patient_id = t.patient_id
+WHERE 
+  p.date_of_registration >= d.year_reg
+GROUP BY 
+  YEAR(t.start_dt), 
+  d.doc_id
+ORDER BY 
+  YEAR;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_date_join,"How many distinct patients had treatments in each of the last 3 months, not including the current month? Out of these, how many had treatments with biologic drugs? Return the month, patient count, and biologic treatment count.","
+Follow the instructions below to generate the query:
+Biologic drugs have drug_type = 'biologic'.
+Truncate start_dt to month for aggregation.
+","SELECT DATE_TRUNC('month', t.start_dt) AS MONTH, COUNT(DISTINCT t.patient_id) AS patient_count, COUNT(DISTINCT CASE WHEN d.drug_type = 'biologic' THEN t.patient_id ELSE NULL END) AS biologic_count FROM treatments t JOIN drugs d ON t.drug_id = d.drug_id WHERE t.start_dt >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months' AND t.start_dt < DATE_TRUNC('month', CURRENT_DATE) GROUP BY MONTH","To calculate the DDD (Defined Daily Dose) = the total amount of drug consumed divided by the total number of days of treatment
+To count the number of adverse events reported for treatments involving any specified drug type, first join the treatments table with the adverse_events table based on treatment_id, then apply a filter by the specified drug type.
+To determine the SDR (Specialty Doctor Rank) = rank doctors within their specialty by the number of distinct drugs prescribed, with those prescribing more distinct drugs achieving a higher rank
+Biologic drugs have drug_type = 'biologic'. Truncate start_dt to month for aggregation.",postgres,"SELECT 
+  date_trunc('month', start_dt) AS month,
+  count(DISTINCT patient_id) AS patient_count,
+  count(CASE WHEN drug_type  =  'biologic' THEN 1 END) AS biologic_treatment_count
+FROM 
+  treatments 
+WHERE 
+  start_dt >= (CURRENT_DATE - interval '3 months')
+GROUP BY 
+  month
+ORDER BY 
+  month DESC;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""drug_type"" does not exist
+LINE 4:   count(CASE WHEN drug_type  =  'biologic' THEN 1 END) AS bi...
+                          ^
+
+[SQL: SELECT 
+  date_trunc('month', start_dt) AS month,
+  count(DISTINCT patient_id) AS patient_count,
+  count(CASE WHEN drug_type  =  'biologic' THEN 1 END) AS biologic_treatment_count
+FROM 
+  treatments 
+WHERE 
+  start_dt >= (CURRENT_DATE - interval '3 months')
+GROUP BY 
+  month
+ORDER BY 
+  month DESC;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_date_join,"How many treatments did the patient Alice have in the last 6 months, not including the current month?","
+Follow the instructions below to generate the query:
+Last 6 months = DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months' to DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 day'.
+Always join treatments with patients before using the treatments table.
+If not mentioned, the patient name provided is the first name.
+","SELECT COUNT(t.treatment_id) FROM treatments t JOIN patients p ON t.patient_id = p.patient_id WHERE p.first_name = 'Alice' AND t.start_dt BETWEEN DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months' AND DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 day'","Last 6 months = DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months' to DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 day'. Always join treatments with patients before using the treatments table. If not mentioned, the patient name provided is the first name. To identify doctors with certain name characteristics; To calculate the total adverse event counts for specific drug treatments; To examine patient diagnosis and treatment correlations with certain drugs.",postgres,"SELECT count(*) FROM treatments AS t1
+JOIN patients AS p1 ON t1.patient_id  =  p1.patient_id
+WHERE p1.first_name  =  'Alice'
+AND t1.start_dt  >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '6 months'
+AND t1.start_dt  <  DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 day';",,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_date_join,"What are the PMPD and PMTC for each of the last 12 months, not including the current month","
+Follow the instructions below to generate the query:
+PMPD = per month patient diagnoses.
+PMTC = per month treatment count.
+Truncate start_dt to month for aggregation.
+","SELECT DATE_TRUNC('month', t.start_dt) AS MONTH, COUNT(DISTINCT d.diag_id) AS patient_count, COUNT(DISTINCT t.treatment_id) AS treatment_count FROM treatments t JOIN diagnoses d ON t.diag_id = d.diag_id WHERE t.start_dt >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '12 months' AND t.start_dt < DATE_TRUNC('month', CURRENT_DATE) GROUP BY MONTH",PMPD = per month patient diagnoses. PMTC = per month treatment count. Truncate start_dt to month for aggregation. TPC = count of female patients; AWF = average weight for male patients; D7D100PIR = (average PASI score at day 100 - average PASI score at day 7) / average PASI score at day 7 * 100 with non-null PASI scores at both timepoints; DDD = total consumed drug amount divided by total treatment days.,postgres,"SELECT 
+  to_char(start_dt, 'YYYY-MM') AS month,
+  count(CASE WHEN is_placebo THEN 1 END) AS pmtc,
+  count(CASE WHEN NOT is_placebo THEN 1 END) AS pmpd
+FROM 
+  treatments
+WHERE 
+  start_dt >= (current_date - interval '1 year')
+GROUP BY 
+  to_char(start_dt, 'YYYY-MM')
+ORDER BY 
+  month DESC;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_date_join,Which drug had the highest number of adverse events reported within the same month as the treatment start date (adverse event or treatment can be earlier than the other)? Return the number of adverse events along with the drug's id and name.,"
+Follow the instructions below to generate the query:
+If events from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date).
+","WITH adverse_events_per_drug AS (SELECT d.drug_id, COUNT(ae.id) AS num_events FROM adverse_events ae JOIN treatments t ON ae.treatment_id = t.treatment_id AND DATE_TRUNC('month', ae.reported_dt) = DATE_TRUNC('month', t.start_dt) JOIN drugs d ON t.drug_id = d.drug_id GROUP BY d.drug_id) SELECT ae.drug_id, d.drug_name, ae.num_events FROM adverse_events_per_drug ae JOIN drugs d USING(drug_id) ORDER BY ae.num_events DESC LIMIT 1","If events from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date). To determine the total count of adverse reactions reported for treatments that include topical medications, associate treatments with adverse_events through the treatment identifier, applying a filter based on the type of medication. To identify the healthcare providers who have prescribed a specific category of medication along with their state, connect doctors to treatments by doctor identifier, filtering by the type of medication To calculate the average weight of patients who have received a certain medication, link patients to treatments via the patient identifier, then narrow down by the name of the medication",postgres,"SELECT t2.drug_id, t2.drug_name, COUNT(*) AS num_adverse_events
+FROM drugs AS t1
+JOIN adverse_events AS t2 ON t1.drug_id  =  t2.drug_id
+WHERE t2.reported_dt >= t1.start_date
+GROUP BY t2.drug_id, t2.drug_name
+ORDER BY num_adverse_events DESC
+LIMIT 1;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column t2.drug_id does not exist
+LINE 3: JOIN adverse_events AS t2 ON t1.drug_id  =  t2.drug_id
+                                                    ^
+HINT:  Perhaps you meant to reference the column ""t1.drug_id"".
+
+[SQL: SELECT t2.drug_id, t2.drug_name, COUNT(*) AS num_adverse_events
+FROM drugs AS t1
+JOIN adverse_events AS t2 ON t1.drug_id  =  t2.drug_id
+WHERE t2.reported_dt >= t1.start_date
+GROUP BY t2.drug_id, t2.drug_name
+ORDER BY num_adverse_events DESC
+LIMIT 1;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_string_matching,How many patients have a Gmail or Yahoo email address?,"
+Follow the instructions below to generate the query:
+Patients with gmail or yahoo email addresses
+",SELECT COUNT(*) FROM patients WHERE email LIKE '%@gmail.com' OR email LIKE '%@yahoo.com',"To calculate the total number of adverse events for treatments involving topical medications, join the treatments and adverse_events tables on treatment_id, and then filter based on the drug's form.
+Patients with gmail or yahoo email addresses
+To find the average weight of patients treated with a specific drug, join the patients and treatments tables by patient_id, then select the drug of interest
+To identify doctors who have prescribed a certain type of drug and their practice states, join the doctors and treatments tables on doc_id, filtering by the drug's category",postgres,SELECT count(*) FROM patients WHERE email LIKE '%@gmail.com%' OR email LIKE '%@yahoo.com%';,,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,instructions_string_matching,"Return the first name, last name and specialty of doctors whose first name starts with 'J' or last name contains 'son', case-insensitive.","
+Follow the instructions below to generate the query:
+Doctors whose first name starts with 'J' or last name contains 'son', case-insensitive
+","SELECT first_name, last_name, specialty FROM doctors WHERE first_name ILIKE 'J%' OR last_name ILIKE '%son%'","Doctors whose first name starts with 'J' or last name contains 'son', case-insensitive To calculate the total number of adverse events reported for treatments involving topical drugs, first join treatments with adverse_events on treatment_id, then filter by the drug type. To identify doctors who have prescribed a certain drug type and their respective states, first join doctors with treatments on doc_id, then filter by the drug type To find the average weight of patients treated with a specific drug, first join patients with treatments on patient_id, then filter by the drug name",postgres,"SELECT first_name,  last_name,  specialty FROM doctors WHERE LOWER(first_name) LIKE 'j%' OR LOWER(last_name) ILIKE '%son%';",,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,keywords_aggregate,What is the CAW for male patients,"
+Follow the instructions below to generate the query:
+CAW = cohort average weight in kilograms
+",SELECT AVG(weight_kg) AS caw FROM patients WHERE gender = 'Male',"A doctor's Specialty Distinct Drug Rank (SDR) is established by the variety of distinct drugs they've prescribed, with the highest prescribers ranked first.
+CAW = cohort average weight in kilograms
+To calculate the D7D100PIR, subtract the average PASI score at the beginning of the period from the average at the end, divide by the initial average, and multiply by 100
+The Defined Daily Dose (DDD) is calculated as the total consumed medication divided by the treatment duration",postgres,SELECT avg(weight_kg) AS CAW FROM patients WHERE gender  =  'Male';,,,1,1,0,0,0,,0,,,,,,,,,,,False
+derm_treatment,keywords_aggregate,What is the PIC for female patients?,"
+Follow the instructions below to generate the query:
+PIC = private insured patient count
+",SELECT COUNT(patient_id) AS pic FROM patients WHERE gender = 'Female' AND ins_type = 'private',"PIC = private insured patient count. To calculate the D7D100PIR, subtract the average PASI score at day 100 from the average at day 7, divide by the average at day 7, and multiply by 100. PI calculates the month-over-month growth in new patients. For DDD, divide the total drug quantity used by the total treatment days",postgres,SELECT PIC FROM patients WHERE gender  =  'Female';,,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""pic"" does not exist
+LINE 1: SELECT PIC FROM patients WHERE gender  =  'Female';
+               ^
+
+[SQL: SELECT PIC FROM patients WHERE gender  =  'Female';]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,keywords_ratio,Calculate the DDD for each drug. Return the drug name and DDD value.,"
+Follow the instructions below to generate the query:
+DDD (defined daily dose) = total drug amount consumed / total days of treatment (end - start date in days), where end date is not null
+","SELECT d.drug_name, AVG(t.tot_drug_amt / NULLIF((t.end_dt - t.start_dt), 0)) AS ddd FROM treatments t JOIN drugs d ON t.drug_id = d.drug_id WHERE t.end_dt IS NOT NULL GROUP BY d.drug_name","DDD (defined daily dose) = total drug amount consumed / total days of treatment (end - start date in days). To find the average weight of patients treated with a specific drug, first join patients with treatments on patient_id, then filter by the drug name. To identify doctors who have prescribed a certain drug type and their respective locations, first join doctors with treatments on doc_id, then filter by the drug type. To calculate the total number of adverse events reported for treatments involving certain drug types, first join treatments with adverse_events on treatment_id, then filter by the drug type.",postgres,"SELECT drugs.drug_name, 
+       CAST(SUM(treatments.tot_drug_amt) AS FLOAT) / NULLIF(CAST(treatments.end_dt - treatments.start_dt AS BIGINT), 0) AS DDD
+FROM drugs
+JOIN treatments ON drugs.drug_id = treatments.drug_id
+WHERE treatments.end_dt IS NOT NULL
+GROUP BY drugs.drug_id;",,"QUERY EXECUTION ERROR: (psycopg2.errors.GroupingError) column ""treatments.end_dt"" must appear in the GROUP BY clause or be used in an aggregate function
+LINE 2: ...(treatments.tot_drug_amt) AS FLOAT) / NULLIF(CAST(treatments...
+                                                             ^
+
+[SQL: SELECT drugs.drug_name, 
+       CAST(SUM(treatments.tot_drug_amt) AS FLOAT) / NULLIF(CAST(treatments.end_dt - treatments.start_dt AS BIGINT), 0) AS DDD
+FROM drugs
+JOIN treatments ON drugs.drug_id = treatments.drug_id
+WHERE treatments.end_dt IS NOT NULL
+GROUP BY drugs.drug_id;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+derm_treatment,keywords_ratio,What is the overall D7D100PIR across all treatments? Return the percentage value.,"
+Follow the instructions below to generate the query:
+D7D100PIR (day 7 to day 100 PASI improvement rate) = (avg PASI score on day 100 - avg PASI score on day 7) / avg PASI score on day 7 * 100.
+This should only include patients who have non-null PASI scores for both timepoints.
+",SELECT (AVG(day100_pasi_score) - AVG(day7_pasi_score)) / AVG(day7_pasi_score) * 100 AS d7d100pir FROM outcomes WHERE day7_pasi_score IS NOT NULL AND day100_pasi_score IS NOT NULL,"To discover the average weight of patients who have been prescribed a specific medication, begin by associating patients with treatments on patient_id, and then apply a filter by the drug name.
+D7D100PIR (day 7 to day 100 PASI improvement rate) = (avg PASI score on day 100 - avg PASI score on day 7) / avg PASI score on day 7 * 100. This should only include patients who have non-null PASI scores for both timepoints.
+To identify doctors who have prescribed a certain type of drug and their state of practice, initially join doctors with treatments on doc_id, followed by filtering based on the drug type
+To calculate the total number of adverse events reported for treatments involving topical drugs, first link treatments with adverse_events on treatment_id, then use a filter for the drug type",postgres,"SELECT 
+  CAST(SUM(CASE WHEN day100_pasi_score IS NULL THEN 0 ELSE day100_pasi_score - day7_pasi_score END) AS FLOAT) / NULLIF(SUM(CASE WHEN day7_pasi_score IS NULL THEN 0 ELSE day100_pasi_score - day7_pasi_score END), 0) AS D7D100PIR
+FROM
+  treatments;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""day100_pasi_score"" does not exist
+LINE 2:   CAST(SUM(CASE WHEN day100_pasi_score IS NULL THEN 0 ELSE d...
+                             ^
+
+[SQL: SELECT 
+  CAST(SUM(CASE WHEN day100_pasi_score IS NULL THEN 0 ELSE day100_pasi_score - day7_pasi_score END) AS FLOAT) / NULLIF(SUM(CASE WHEN day7_pasi_score IS NULL THEN 0 ELSE day100_pasi_score - day7_pasi_score END), 0) AS D7D100PIR
+FROM
+  treatments;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_join,What is the marketing opt-in preference for each user? Return the user ID and boolean opt-in value,"
+Follow the instructions below to generate the query:
+To get any user's settings, only select the latest snapshot of user_setting_snapshot for each user
+","WITH user_latest_setting AS (SELECT u.uid, s.marketing_opt_in, s.created_at, ROW_NUMBER() OVER (PARTITION BY u.uid ORDER BY s.created_at DESC) AS rn FROM consumer_div.users u JOIN consumer_div.user_setting_snapshot s ON u.uid = s.user_id) SELECT UID, marketing_opt_in FROM user_latest_setting WHERE rn = 1","CPUR (coupon usage rate) = Ratio of distinct coupons used to number of distinct transactions.
+AMB = Average balance of user wallets over a recent period
+STR (success transaction rate) = Ratio of successful transactions to total transactions
+To get any user's settings, only select the latest snapshot of user_setting_snapshot for each user",postgres,"SELECT u.uid, u.marketing_opt_in FROM consumer_div.users u
+JOIN consumer_div.user_setting_snapshot us ON u.uid = us.user_id
+ORDER BY u.uid;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column u.marketing_opt_in does not exist
+LINE 1: SELECT u.uid, u.marketing_opt_in FROM consumer_div.users u
+                      ^
+HINT:  Perhaps you meant to reference the column ""us.marketing_opt_in"".
+
+[SQL: SELECT u.uid, u.marketing_opt_in FROM consumer_div.users u
+JOIN consumer_div.user_setting_snapshot us ON u.uid = us.user_id
+ORDER BY u.uid;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_join,What is the total number of wallet transactions sent by each user that is not a merchant? Return the user ID and total transaction count.,"
+Follow the instructions below to generate the query:
+To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a CTE, then aggregate by user_id and count the number of transactions
+","WITH user_transactions AS (SELECT u.uid, t.txid FROM consumer_div.users u JOIN consumer_div.wallet_transactions_daily t ON u.uid = t.sender_id WHERE t.sender_type = 0) SELECT UID, COUNT(txid) AS total_transactions FROM user_transactions GROUP BY UID","PMDAU = Aggregate daily active users by truncating the date to the month for aggregation.
+AMB = Average balance of user wallets
+LUB = Most recent balance for each user
+To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a CTE, then aggregate by user_id and count the number of transactions",postgres,"WITH user_transactions AS (
+  SELECT 
+    wtd.sender_id,
+    COUNT(*) AS transaction_count
+  FROM 
+    consumer_div.wallet_transactions_daily AS wtd
+  WHERE 
+    wtd.sender_type!= 1 --exclude merchants
+  GROUP BY 
+    wtd.sender_id
+)
+SELECT 
+  ut.sender_id,
+  ut.transaction_count
+FROM 
+  user_transactions AS ut
+ORDER BY 
+  ut.transaction_count DESC;",,,0,1,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_join,What is the total session duration in seconds for each user between 2023-06-01 inclusive and 2023-06-08 exclusive? Return the user ID and their total duration as an integer sorted by total duration with the longest duration first,"
+Follow the instructions below to generate the query:
+To analyze user engagement, join the users and user_sessions tables in a CTE, then aggregate to calculate total session duration per user for a given date range.
+Remember to convert your answer into seconds, using EPOCH function
+","WITH user_session_duration AS (SELECT u.uid, s.session_start_ts, s.session_end_ts FROM consumer_div.users u JOIN consumer_div.user_sessions s ON u.uid = s.user_id WHERE s.session_start_ts >= '2023-06-01' AND s.session_end_ts < '2023-06-08') SELECT UID, CAST(SUM(EXTRACT(EPOCH FROM session_end_ts) - EXTRACT(EPOCH FROM session_start_ts)) AS INT) AS total_duration FROM user_session_duration GROUP BY UID ORDER BY total_duration DESC","LUB = Most recent account balance for each user. CPUR (coupon usage rate) = Ratio of distinct coupons used to the number of distinct transactions AMB = Average balance of user wallets over a specified period To analyze user engagement, join the users and user_sessions tables in a CTE, then aggregate to calculate total session duration per user for a given date range",postgres,"WITH user_session_duration AS (
+  SELECT 
+    user_id, 
+    EXTRACT(EPOCH FROM (session_end_ts - session_start_ts)) AS session_duration_seconds
+  FROM 
+    consumer_div.user_sessions
+  WHERE 
+    session_start_ts >= '2023-06-01' AND session_start_ts < '2023-06-08'
+)
+SELECT 
+  user_id, 
+  sum(session_duration_seconds) AS total_session_duration_seconds
+FROM 
+  user_session_duration
+GROUP BY 
+  user_id
+ORDER BY 
+  total_session_duration_seconds DESC;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_join,What is the total transaction amount for each coupon offered by merchant with ID 1? Return the coupon ID and total amount transacted with it.,"
+Follow the instructions below to generate the query:
+To get coupon usage, join the coupons and wallet_transactions_daily on coupon_id 
+","WITH merchant_coupon_usage AS (SELECT c.cid, t.amount FROM consumer_div.coupons c JOIN consumer_div.wallet_transactions_daily t ON c.cid = t.coupon_id WHERE c.merchant_id = 1) SELECT cid, SUM(amount) AS total_discount FROM merchant_coupon_usage GROUP BY cid","AMB = Average balance of user wallets updated recently
+To get coupon usage, join the coupons and wallet_transactions_daily on coupon_id 
+STR (success transaction rate) = Number of successful transactions divided by total transactions
+PMDAU = Aggregation based on truncating creation dates to months for active user metrics.",postgres,"SELECT c.cid, 
+       sum(w.amount) AS total_transaction_amount
+FROM consumer_div.coupons AS c
+JOIN consumer_div.wallet_transactions_daily AS w ON c.cid  =  w.coupon_id
+WHERE c.merchant_id  = 1
+GROUP BY c.cid;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_window,What is the LUB for each user.,"
+Follow the instructions below to generate the query:
+LUB = Latest User Balance, which is the most recent balance for each user
+","WITH user_balances AS (SELECT user_id, balance, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY updated_at DESC) AS rn FROM consumer_div.wallet_user_balance_daily) SELECT user_id, balance FROM user_balances WHERE rn = 1","To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a common table expression (CTE), then group by user_id to count transactions
+LUB = Latest User Balance, which is the most recent balance for each user
+To determine user notification preferences, use a join between the users and user_setting_snapshot tables in a CTE, focusing on selecting the most recent snapshot for each user.
+For analyzing coupon usage, start with a join between the coupons and wallet_transactions_daily tables in a CTE, apply filtering as needed, and then perform aggregation for the total discount amount",postgres,"SELECT u.uid, u.username, wub.balance AS LUB
+FROM consumer_div.users u
+JOIN consumer_div.wallet_user_balance_daily wub ON u.uid = wub.user_id
+ORDER BY wub.updated_at DESC;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_cte_window,"What is the MRR for each merchant? Return the merchant name, category, revenue amount, and revenue rank.","
+Follow the instructions below to generate the query:
+MRR = Merchant Revenue Rank, which ranks merchants based on amounts from successfully received transactions only.
+Filter receiver_type=1 in consumer_div.wallet_transactions_daily for merchants.
+Merchant with rank 1 has the highest revenue.
+","WITH merchant_revenue AS (SELECT {m.mid, m.name}, m.category AS merchant_category, SUM(w.amount) AS total_revenue FROM consumer_div.merchants m INNER JOIN consumer_div.wallet_transactions_daily w ON m.mid = w.receiver_id AND w.receiver_type = 1 WHERE w.status = 'success' GROUP BY {}, m.category) SELECT *, RANK() OVER (ORDER BY total_revenue DESC) AS mrr FROM merchant_revenue","To get user notification preferences, join the users and user_setting_snapshot tables in a CTE, then select the latest snapshot for each user
+Merchant category should be matched case-insensitively with wildcards, e.g., using LOWER(merchants.category) LIKE '%...%'.
+MRR = Merchant Revenue Rank, which ranks merchants based on their total successful received transaction amounts. Filter receiver_type=1 in consumer_div.wallet_transactions_daily for merchants. Merchant with rank 1 has the highest revenue.
+To analyze user engagement, join the users and user_sessions tables in a CTE, then aggregate to calculate total session duration per user",postgres,"SELECT 
+  merchants.name, 
+  merchants.category, 
+  SUM(CASE WHEN wallet_transactions_daily.sender_type = 1 THEN wallet_transactions_daily.amount ELSE 0 END) AS revenue_amount, 
+  RANK() OVER (ORDER BY SUM(CASE WHEN wallet_transactions_daily.sender_type = 1 THEN wallet_transactions_daily.amount ELSE 0 END) DESC) AS revenue_rank
+FROM 
+  consumer_div.merchants AS merchants
+JOIN 
+  consumer_div.wallet_transactions_daily AS wallet_transactions_daily ON merchants.mid = wallet_transactions_daily.merchant_id
+WHERE 
+  wallet_transactions_daily.receiver_type = 1
+GROUP BY 
+  merchants.name, 
+  merchants.category
+ORDER BY 
+  revenue_amount DESC, 
+  revenue_rank ASC;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column wallet_transactions_daily.merchant_id does not exist
+LINE 9: ...y AS wallet_transactions_daily ON merchants.mid = wallet_tra...
+                                                             ^
+
+[SQL: SELECT 
+  merchants.name, 
+  merchants.category, 
+  SUM(CASE WHEN wallet_transactions_daily.sender_type = 1 THEN wallet_transactions_daily.amount ELSE 0 END) AS revenue_amount, 
+  RANK() OVER (ORDER BY SUM(CASE WHEN wallet_transactions_daily.sender_type = 1 THEN wallet_transactions_daily.amount ELSE 0 END) DESC) AS revenue_rank
+FROM 
+  consumer_div.merchants AS merchants
+JOIN 
+  consumer_div.wallet_transactions_daily AS wallet_transactions_daily ON merchants.mid = wallet_transactions_daily.merchant_id
+WHERE 
+  wallet_transactions_daily.receiver_type = 1
+GROUP BY 
+  merchants.name, 
+  merchants.category
+ORDER BY 
+  revenue_amount DESC, 
+  revenue_rank ASC;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_date_join,"For users in the US and Canada, how many total notifications were sent in each of the last 3 weeks excluding the current week? How many of those were sent on weekends?","
+Follow the instructions below to generate the query:
+Weekends are Saturdays and Sundays.
+Truncate created_at to week for aggregation.
+","SELECT DATE_TRUNC('week', n.created_at) AS WEEK, COUNT(*) AS total_notifications, COUNT(CASE WHEN EXTRACT(dow FROM n.created_at) IN (0, 6) THEN 1 END) AS weekend_notifications FROM consumer_div.notifications n JOIN consumer_div.users u ON n.user_id = u.uid WHERE u.country IN ('US', 'CA') AND n.created_at >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '3 weeks' AND n.created_at < DATE_TRUNC('week', CURRENT_DATE) GROUP BY WEEK","To gauge user engagement, link users to their sessions without defining a specific date range for total session duration analysis
+To analyze coupon usage, join the coupons and transactions tables to aggregate total discount amounts without specifying a merchant
+Merchant categories should be matched using a case-insensitive pattern without necessitating wildcards.
+Weekends are Saturdays and Sundays. Truncate created_at to week for aggregation.",postgres,"SELECT 
+  to_char(created_at::date, 'Day') AS weekday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 1 AND 5) AS monday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 6 AND 7) AS tuesday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 7 AND 8) AS wednesday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 8 AND 9) AS thursday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 9 AND 10) AS friday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 10 AND 11) AS saturday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 11 AND 12) AS sunday
+FROM 
+  consumer_div.notifications
+WHERE 
+  country IN ('US', 'CA')
+GROUP BY 
+  weekday
+ORDER BY 
+  weekday;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedFunction) operator does not exist: text >= integer
+LINE 3: ...t(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 1 ...
+                                                             ^
+HINT:  No operator matches the given name and argument types. You might need to add explicit type casts.
+
+[SQL: SELECT 
+  to_char(created_at::date, 'Day') AS weekday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 1 AND 5) AS monday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 6 AND 7) AS tuesday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 7 AND 8) AS wednesday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 8 AND 9) AS thursday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 9 AND 10) AS friday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 10 AND 11) AS saturday,
+  count(*) FILTER (WHERE to_char(created_at::date, 'I') BETWEEN 11 AND 12) AS sunday
+FROM 
+  consumer_div.notifications
+WHERE 
+  country IN ('US', 'CA')
+GROUP BY 
+  weekday
+ORDER BY 
+  weekday;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_date_join,How many wallet transactions were made by users from the US in the last 7 days inclusive of today? Return the number of transactions and total transaction amount.,"
+Follow the instructions below to generate the query:
+Last 7 days = CURRENT_DATE - INTERVAL '7 days' to CURRENT_DATE.
+Always join wallet_transactions_daily with users before using the wallet_transactions_daily table.
+","SELECT COUNT(*) AS num_transactions, SUM(amount) AS total_amount FROM consumer_div.wallet_transactions_daily t JOIN consumer_div.users u ON t.sender_id = u.uid WHERE u.country = 'US' AND t.created_at >= CURRENT_DATE - INTERVAL '7 days' AND t.created_at < CURRENT_DATE + INTERVAL '1 day'","To analyze coupon usage, join the coupons and wallet_transactions tables in a CTE, filter for a specific merchant, then aggregate to get the total discount amount
+Last 7 days = CURRENT_DATE - INTERVAL '7 days' to CURRENT_DATE. Always join wallet_transactions_daily with users before using the wallet_transactions_daily table.
+To get user notification preferences, join the users and user_setting_snapshot tables in a CTE, then select the latest snapshot for each user.
+To get the total number of transactions per user, join the users and wallet_transactions tables in a CTE, then aggregate by user_uid and count the number of transactions",postgres,"SELECT count(*),  sum(amount) FROM consumer_div.wallet_transactions_daily
+WHERE sender_country  =  'US' AND created_at >= CURRENT_DATE - INTERVAL '7 days'
+AND created_at  <= CURRENT_DATE;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column ""sender_country"" does not exist
+LINE 2: WHERE sender_country  =  'US' AND created_at >= CURRENT_DATE...
+              ^
+
+[SQL: SELECT count(*),  sum(amount) FROM consumer_div.wallet_transactions_daily
+WHERE sender_country  =  'US' AND created_at >= CURRENT_DATE - INTERVAL '7 days'
+AND created_at  <= CURRENT_DATE;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_date_join,What is the PMDAU (Per Month Daily Active Users) for wallet transactions in the last 2 months excluding the current month?,"
+Follow the instructions below to generate the query:
+PMDAU (Per Month Daily Active Users) = COUNT(DISTINCT(sender_id) ...
+WHERE t.sender_type = 0.
+Truncate created_at to month for aggregation.
+","SELECT DATE_TRUNC('month', t.created_at) AS MONTH, COUNT(DISTINCT t.sender_id) AS active_users FROM consumer_div.wallet_transactions_daily t WHERE t.sender_type = 0 AND t.created_at >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '2 months' AND t.created_at < DATE_TRUNC('month', CURRENT_DATE) GROUP BY MONTH","PMDAU (Per Month Daily Active Users) = COUNT(DISTINCT(sender_id) ... WHERE t.sender_type = 0. Truncate created_at to month for aggregation. To analyze coupon usage, join the coupons and wallet_transactions_daily tables in a CTE, filter for transactions associated with a specific merchant, then aggregate to calculate the total discount amount received To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a common table expression (CTE), then aggregate by user_id and count the transactions To get user notification preferences, join the users and user_setting_snapshot tables in a CTE, then select the most recent snapshot for each user.",postgres,"SELECT 
+  date_trunc('month', created_at) AS month, 
+  COUNT(DISTINCT txid) AS pmdau 
+FROM 
+  consumer_div.wallet_transactions_daily 
+WHERE 
+  created_at >= date_trunc('month', CURRENT_DATE) - interval '2 months' 
+  AND sender_type = 0 
+GROUP BY 
+  month 
+ORDER BY 
+  month DESC;",,,0,1,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_date_join,Which merchant created the highest number of coupons within the same month that the merchant was created (coupon or merchant can be created earlier than the other)? Return the number of coupons along with the merchant's id and name.,"
+Follow the instructions below to generate the query:
+If events from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date).
+","WITH coupons_per_merchant AS (SELECT m.mid, COUNT(c.cid) AS num_coupons FROM consumer_div.coupons c JOIN consumer_div.merchants m ON m.mid = c.merchant_id AND DATE_TRUNC('month', c.created_at) = DATE_TRUNC('month', m.created_at) GROUP BY m.mid) SELECT coupons_per_merchant.mid, m.name, coupons_per_merchant.num_coupons FROM coupons_per_merchant JOIN consumer_div.merchants m USING(mid) ORDER BY coupons_per_merchant.num_coupons DESC LIMIT 1","To analyze coupon usage, join the coupons and wallet_transactions_daily tables in a CTE, filtering for specific merchants, then aggregate If events from 2 different tables from the same interval are to be joined, join on the respective truncated date fields eg `FROM t1 JOIN t2 ON DATE_TRUNC('<interval>', t1.date)=DATE_TRUNC('<interval>', t2.date). To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a CTE, then aggregate by user_id To get user notification preferences, join the users and user_setting_snapshot tables in a CTE, selecting the most recent snapshot for each user.",postgres,"SELECT 
+  c.merchant_id, 
+  m.name, 
+  COUNT(*) AS coupon_count
+FROM 
+  consumer_div.coupons AS c
+JOIN 
+  consumer_div.merchants AS m ON c.merchant_id = m.mid
+WHERE 
+  c.start_date >= DATE_TRUNC('month', CURRENT_DATE)
+GROUP BY 
+  c.merchant_id, 
+  m.name
+ORDER BY 
+  coupon_count DESC
+LIMIT 1;",,,1,1,0,0,0,,0,,,,,,,,,,,False
+ewallet,instructions_string_matching,How many active retail merchants have issued coupons? Return the merchant name and the total number of coupons issued.,"
+Follow the instructions below to generate the query:
+Merchant category should be matched case-insensitively with wildcards, e.g., LOWER(merchants.category) LIKE '%...%'.
+","SELECT m.name, COUNT(c.cid) AS total_coupons FROM consumer_div.merchants m JOIN consumer_div.coupons c ON m.mid = c.merchant_id WHERE m.status = 'active' AND LOWER(m.category) LIKE '%retail%' GROUP BY m.name","To determine user notification settings, combine the users and user_settings tables in a CTE, selecting the most recent settings for each user.
+Merchant category should be matched case-insensitively with wildcards, e.g., LOWER(merchants.category) LIKE '%...%'.
+To get the total number of transactions per user, join the users and wallet_transactions tables in a common table expression (CTE), then sum up transactions by user ID
+To assess coupon utilization, link the coupons and wallet_transactions tables in a CTE, filter for particular merchants, then calculate the total discount amounts",postgres,"SELECT T1.name,  COUNT(*) FROM consumer_div.coupons AS T1 JOIN consumer_div.merchants AS T2 ON T1.merchant_id  =  T2.mid WHERE T2.status  =  'active' GROUP BY T1.name;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column t1.name does not exist
+LINE 1: SELECT T1.name,  COUNT(*) FROM consumer_div.coupons AS T1 JO...
+               ^
+HINT:  Perhaps you meant to reference the column ""t2.name"".
+
+[SQL: SELECT T1.name,  COUNT(*) FROM consumer_div.coupons AS T1 JOIN consumer_div.merchants AS T2 ON T1.merchant_id  =  T2.mid WHERE T2.status  =  'active' GROUP BY T1.name;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,instructions_string_matching,Which users from the US have unread promotional notifications? Return the username and the total number of unread promotional notifications.,"
+Follow the instructions below to generate the query:
+User country should be matched case-insensitively, e.g., LOWER(users.country) = 'us'.
+Notification type and status should be matched exactly.
+","SELECT u.username, COUNT(n.id) AS total_notifications FROM consumer_div.users u JOIN consumer_div.notifications n ON u.uid = n.user_id WHERE n.type = 'promotion' AND n.status = 'unread' AND LOWER(u.country) = 'us' GROUP BY u.username","For merchant revenue analysis, rank merchants by their total successful transaction amounts without specifying any rank number To derive user engagement metrics, aggregate total session durations for users by joining with the user_sessions table over an unspecified date range. To calculate the Average Balance of user wallets, join the users and wallet_transactions_daily tables, then compute the average balance for a specified period User country should be matched case-insensitively, e.g., LOWER(users.country) = 'us'. Notification type and status should be matched exactly.",postgres,"SELECT T1.username,  count(*) FROM consumer_div.notifications AS T1 JOIN consumer_div.users AS T2 ON T1.user_id  =  T2.uid WHERE T1.status  =  'unread' AND T2.country  =  'us' GROUP BY T1.username;",,"QUERY EXECUTION ERROR: (psycopg2.errors.UndefinedColumn) column t1.username does not exist
+LINE 1: SELECT T1.username,  count(*) FROM consumer_div.notification...
+               ^
+HINT:  Perhaps you meant to reference the column ""t2.username"".
+
+[SQL: SELECT T1.username,  count(*) FROM consumer_div.notifications AS T1 JOIN consumer_div.users AS T2 ON T1.user_id  =  T2.uid WHERE T1.status  =  'unread' AND T2.country  =  'us' GROUP BY T1.username;]
+(Background on this error at: https://sqlalche.me/e/20/f405)",0,0,0,1,0,,0,,,,,,,,,,,False
+ewallet,keywords_aggregate,"What is the TUC in the past month, inclusive of 1 month ago? Return the total count.","
+Follow the instructions below to generate the query:
+TUC = Total number of user sessions in the past month
+",SELECT COUNT(*) AS TUC FROM consumer_div.user_sessions WHERE session_start_ts >= CURRENT_DATE - INTERVAL '1 month' OR session_end_ts >= CURRENT_DATE - INTERVAL '1 month',"To analyze coupon usage, join the coupons and transactions tables in a CTE, filtering for any required criteria, then aggregate to find the total discount amount TUC = Total number of user sessions in the past month To get user notification preferences, join the users and settings tables in a CTE, selecting the most recent settings snapshot for each user. To get the total number of transactions per user, join the users and transactions tables in a common table expression (CTE), then aggregate by user_id to count transactions",postgres,"SELECT count(*) FROM consumer_div.wallet_transactions_daily
+WHERE created_at >= (current_date - interval '1 month')
+AND created_at <  current_date;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+ewallet,keywords_aggregate,"What is the average AMB for user wallets updated in the past week, inclusive of 7 days ago? Return the average balance.","
+Follow the instructions below to generate the query:
+AMB = average balance per user (for the given time duration)
+",SELECT AVG(balance) AS AMB FROM consumer_div.wallet_user_balance_daily WHERE updated_at >= CURRENT_DATE - INTERVAL '7 days',"For coupon usage analysis, join the coupons and wallet_transactions_daily tables in a CTE, filtering for merchants of interest, and aggregate to compute the total discount amount utilized
+To get the total number of transactions per user, join the users and wallet_transactions_daily tables in a Common Table Expression (CTE), then aggregate by user_id to count the transactions
+To determine user notification preferences, join the users table with the user_setting_snapshot table in a CTE, selecting the most recent settings snapshot for each user.
+AMB = average balance per user (for the given time duration)",postgres,"SELECT avg(w.balance) FROM consumer_div.wallet_user_balance_daily w
+JOIN consumer_div.users u ON w.user_id  =  u.uid
+WHERE w.updated_at >= (current_date - interval '7 days')
+AND u.user_type  =  'user';",,,0,0,0,0,0,,0,,,,,,,,,,,False
+ewallet,keywords_ratio,"Calculate the CPUR for each merchant, considering only successful transactions. Return the merchant name and CPUR.","
+Follow the instructions below to generate the query:
+CPUR (coupon usage rate) = number of distinct coupons used / number of distinct transactions
+","SELECT m.name, (COUNT(DISTINCT c.cid) * 1.0 / NULLIF(COUNT(DISTINCT t.txid), 0)) AS cpur FROM consumer_div.merchants m JOIN consumer_div.coupons c ON m.mid = c.merchant_id JOIN consumer_div.wallet_transactions_daily t ON c.cid = t.coupon_id AND t.status = 'success'  GROUP BY m.name;","To get the total number of transactions per user, join the users and wallet_transactions tables, then aggregate by user_id To analyze user engagement, join the users and user_sessions tables, then aggregate to calculate the total session duration per user for a given period. CPUR (coupon usage rate) = number of distinct coupons used / number of distinct transactions To get user notification preferences, join the users and user_settings tables, then select the latest settings for each user",postgres,"SELECT 
+  merchants.name, 
+  CAST(COUNT(DISTINCT wallet_transactions_daily.sender_id) AS FLOAT) / NULLIF(COUNT(DISTINCT wallet_transactions_daily.receiver_id), 0) AS CPUR
+FROM 
+  consumer_div.merchants merchants
+JOIN 
+  consumer_div.wallet_transactions_daily wallet_transactions_daily
+ON 
+  merchants.mid = wallet_transactions_daily.sender_id OR merchants.mid = wallet_transactions_daily.receiver_id
+WHERE 
+  wallet_transactions_daily.status ='success'
+GROUP BY 
+  merchants.name;",,,0,0,0,0,0,,0,,,,,,,,,,,False
+ewallet,keywords_ratio,What was the STR for wallet transactions in the previous month?,"
+Follow the instructions below to generate the query:
+STR (success transaction rate) = number of successful transactions / total number of transactions
+","SELECT (SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) * 1.0 / COUNT(*)) AS STR FROM consumer_div.wallet_transactions_daily WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month') AND created_at < DATE_TRUNC('month', CURRENT_DATE)","To analyze user engagement, join the users and sessions tables in a CTE, then aggregate to measure total session length per user for a specified period.
+To get user notification preferences, join the users and settings tables in a CTE, then filter for the most recent settings per user
+STR (success transaction rate) = number of successful transactions / total number of transactions
+To analyze coupon usage, join the coupons and transactions tables in a CTE, filter for a particular merchant, then aggregate to calculate the total discount value",postgres,"SELECT 
+  date_trunc('month', wtd.created_at) AS month,
+  COUNT(CASE WHEN wtd.status ='success' THEN 1 END) / NULLIF(COUNT(wtd.status), 0) AS str
+FROM 
+  consumer_div.wallet_transactions_daily AS wtd
+WHERE 
+  wtd.created_at >= date_trunc('month', CURRENT_DATE - interval '1 month')
+  AND wtd.created_at < date_trunc('month', CURRENT_DATE)
+GROUP BY 
+  month
+ORDER BY 
+  month DESC
+LIMIT 1;",,,0,1,0,0,0,,0,,,,,,,,,,,False
